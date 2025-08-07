@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
+    id("org.jetbrains.kotlin.kapt") // Needed for Glide
 }
 
 android {
@@ -26,23 +27,37 @@ android {
             )
         }
     }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
+
     kotlinOptions {
         jvmTarget = "11"
     }
 }
 
 dependencies {
-
+    // AndroidX + Material
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
     implementation(libs.androidx.activity)
     implementation(libs.androidx.constraintlayout)
+
+    // ✅ Testing
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
+
+    // ✅ Supabase Kotlin SDK (OFFICIAL - LATEST)
+    implementation("io.github.jan-tennert.supabase:auth-kt:3.1.1")
+    implementation("io.github.jan-tennert.supabase:postgrest-kt:3.1.1")
+    implementation("io.github.jan-tennert.supabase:storage-kt:3.1.1")
+    implementation("io.github.jan-tennert.supabase:realtime-kt:3.1.1")
+    implementation("io.ktor:ktor-client-okhttp:3.0.3")
+    // ✅ Glide for image loading
+    implementation("com.github.bumptech.glide:glide:4.15.1")
+    kapt("com.github.bumptech.glide:compiler:4.15.1")
 }
