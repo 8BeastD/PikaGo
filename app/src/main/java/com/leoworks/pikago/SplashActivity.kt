@@ -16,7 +16,7 @@ class SplashActivity : AppCompatActivity() {
         setContentView(R.layout.activity_splash)
 
         MainScope().launch {
-            delay(1500) // Splash delay
+            delay(3000) // Splash delay
 
             try {
                 val session = App.supabase.auth.currentSessionOrNull()

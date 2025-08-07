@@ -2,12 +2,12 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@android:color/white"> <!-- You can change to @color/your_brand_color -->
+    android:background="@android:color/black"> <!-- You can change to @color/your_brand_color -->
 
     <ImageView
         android:id="@+id/splash_logo"
-        android:layout_width="180dp"
-        android:layout_height="180dp"
+        android:layout_width="380dp"
+        android:layout_height="300dp"
         android:layout_gravity="center"
         android:src="@drawable/pikago_logo"
         android:contentDescription="Pikago Logo" />
