@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PikaGo</string>
+    <string name="home">Home</string>
+    <string name="ride">Ride</string>
+    <string name="profile">Profile</string>
+    <string name="edit_profile">Edit Profile</string>
+    <string name="verify_now">Verify Now</string>
+    <string name="upload">Upload</string>
+</resources>
