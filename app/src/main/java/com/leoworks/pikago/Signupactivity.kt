@@ -13,10 +13,19 @@ import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.providers.builtin.Email
+import io.github.jan.supabase.postgrest.from
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
+
+@Serializable
+data class UserInsert(
+    val id: String,
+    val email: String,
+    val phone: String? = null
+)
 
 class SignupActivity : AppCompatActivity() {
 
@@ -181,13 +190,25 @@ class SignupActivity : AppCompatActivity() {
 
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                App.supabase.auth.signUpWith(Email) {
-                    if (email != null) {
-                        this.email = email
-                    }
-                    if (password != null) {
-                        this.password = password
-                    }
+                // Step 1: Create Supabase Auth user
+                val user = App.supabase.auth.signUpWith(Email) {
+                    this.email = email!!
+                    this.password = password!!
+                }
+
+                // Step 2: Create user record in our custom table
+                val userId = user?.id
+
+                if (userId != null) {
+                    val userInsert = UserInsert(
+                        id = userId,
+                        email = email!!,
+                        phone = null // Will be updated later
+                    )
+
+                    App.supabase.from("users").insert(userInsert)
+                } else {
+                    throw Exception("Failed to get user ID after signup")
                 }
 
                 withContext(Dispatchers.Main) {
@@ -199,14 +220,13 @@ class SignupActivity : AppCompatActivity() {
                     overridePendingTransition(R.anim.slide_in_left, R.anim.slide_out_right)
                 }
 
-            }catch (e: Exception) {
+            } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     setLoading(false)
-                    e.printStackTrace() // 👈 log detailed crash
+                    e.printStackTrace()
                     showError("Signup failed: ${e.message}")
                 }
             }
-
         }
     }
 
