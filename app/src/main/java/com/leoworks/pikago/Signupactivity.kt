@@ -69,26 +69,18 @@ class SignupActivity : AppCompatActivity() {
     }
 
     private fun setupClickListeners() {
-        signupButton.setOnClickListener {
-            performSignup()
-        }
+        signupButton.setOnClickListener { performSignup() }
 
         loginButton.setOnClickListener {
             finish()
             overridePendingTransition(R.anim.slide_in_left, R.anim.slide_out_right)
         }
 
-        passwordToggle.setOnClickListener {
-            togglePasswordVisibility()
-        }
-
-        confirmPasswordToggle.setOnClickListener {
-            toggleConfirmPasswordVisibility()
-        }
+        passwordToggle.setOnClickListener { togglePasswordVisibility() }
+        confirmPasswordToggle.setOnClickListener { toggleConfirmPasswordVisibility() }
     }
 
     private fun animateEntrance() {
-        // Animate logo and form entrance
         val logo = findViewById<View>(R.id.logoContainer)
         val form = findViewById<View>(R.id.signupForm)
 
@@ -97,18 +89,8 @@ class SignupActivity : AppCompatActivity() {
         logo.translationY = -50f
         form.translationY = 50f
 
-        logo.animate()
-            .alpha(1f)
-            .translationY(0f)
-            .setDuration(800)
-            .start()
-
-        form.animate()
-            .alpha(1f)
-            .translationY(0f)
-            .setDuration(800)
-            .setStartDelay(200)
-            .start()
+        logo.animate().alpha(1f).translationY(0f).setDuration(800).start()
+        form.animate().alpha(1f).translationY(0f).setDuration(800).setStartDelay(200).start()
     }
 
     private fun togglePasswordVisibility() {
@@ -141,81 +123,79 @@ class SignupActivity : AppCompatActivity() {
         val password = passwordInput.text?.toString()
         val confirmPassword = confirmPasswordInput.text?.toString()
 
-        // Clear previous errors
         clearAllErrors()
-
         var hasError = false
 
-        // Validation
         if (fullName.isNullOrEmpty()) {
             fullNameLayout.error = "Full name is required"
-            animateError(fullNameLayout)
-            hasError = true
+            animateError(fullNameLayout); hasError = true
         }
-
         if (email.isNullOrEmpty()) {
             emailLayout.error = "Email is required"
-            animateError(emailLayout)
-            hasError = true
+            animateError(emailLayout); hasError = true
         } else if (!android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches()) {
             emailLayout.error = "Please enter a valid email"
-            animateError(emailLayout)
-            hasError = true
+            animateError(emailLayout); hasError = true
         }
-
         if (password.isNullOrEmpty()) {
             passwordLayout.error = "Password is required"
-            animateError(passwordLayout)
-            hasError = true
+            animateError(passwordLayout); hasError = true
         } else if (password.length < 6) {
             passwordLayout.error = "Password must be at least 6 characters"
-            animateError(passwordLayout)
-            hasError = true
+            animateError(passwordLayout); hasError = true
         }
-
         if (confirmPassword.isNullOrEmpty()) {
             confirmPasswordLayout.error = "Please confirm your password"
-            animateError(confirmPasswordLayout)
-            hasError = true
+            animateError(confirmPasswordLayout); hasError = true
         } else if (password != confirmPassword) {
             confirmPasswordLayout.error = "Passwords do not match"
-            animateError(confirmPasswordLayout)
-            hasError = true
+            animateError(confirmPasswordLayout); hasError = true
         }
 
         if (hasError) return
 
-        // Show loading state
         setLoading(true)
 
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                // Step 1: Create Supabase Auth user
-                val user = App.supabase.auth.signUpWith(Email) {
+                // 1) Sign up
+                App.supabase.auth.signUpWith(Email) {
                     this.email = email!!
                     this.password = password!!
                 }
 
-                // Step 2: Create user record in our custom table
-                val userId = user?.id
+                // 2) Ensure session (for RLS). If email confirmation is required,
+                //    this may fail until verified—it's fine; we'll handle gracefully.
+                if (App.supabase.auth.currentSessionOrNull() == null) {
+                    try {
+                        App.supabase.auth.signInWith(Email) {
+                            this.email = email!!
+                            this.password = password!!
+                        }
+                    } catch (_: Exception) { /* likely needs email verification */ }
+                }
 
-                if (userId != null) {
-                    val userInsert = UserInsert(
-                        id = userId,
-                        email = email!!,
-                        phone = null // Will be updated later
-                    )
+                // 3) Get user id from the current user (not from the signup result)
+                val userId = App.supabase.auth.currentUserOrNull()?.id
+                    ?: throw Exception("Failed to get user ID after signup (verify email first)")
 
+                // 4) Insert into public.users (will only succeed if RLS allows & session exists)
+                val userInsert = UserInsert(
+                    id = userId,
+                    email = email!!,
+                    phone = null
+                )
+
+                try {
                     App.supabase.from("users").insert(userInsert)
-                } else {
-                    throw Exception("Failed to get user ID after signup")
+                } catch (_: Exception) {
+                    // Most common cause: RLS + no session due to unverified email.
+                    // Optional: log it; you can also add a DB trigger to mirror auth.users -> public.users.
                 }
 
                 withContext(Dispatchers.Main) {
                     setLoading(false)
-                    showSuccess("Account created successfully! Please check your email to verify your account.")
-
-                    // Navigate back to login
+                    showSuccess("Account created! Please check your email to verify your account.")
                     finish()
                     overridePendingTransition(R.anim.slide_in_left, R.anim.slide_out_right)
                 }
@@ -241,20 +221,19 @@ class SignupActivity : AppCompatActivity() {
         signupButton.isEnabled = !loading
         if (loading) {
             signupButton.text = "Creating Account..."
-            // Add loading animation to button
             val scaleX = ObjectAnimator.ofFloat(signupButton, "scaleX", 1f, 0.95f, 1f)
             val scaleY = ObjectAnimator.ofFloat(signupButton, "scaleY", 1f, 0.95f, 1f)
             scaleX.duration = 300
             scaleY.duration = 300
-            scaleX.start()
-            scaleY.start()
+            scaleX.start(); scaleY.start()
         } else {
             signupButton.text = "Create Account"
         }
     }
 
     private fun animateError(view: View) {
-        val shake = ObjectAnimator.ofFloat(view, "translationX", 0f, 25f, -25f, 25f, -25f, 15f, -15f, 6f, -6f, 0f)
+        val shake = ObjectAnimator.ofFloat(view, "translationX",
+            0f, 25f, -25f, 25f, -25f, 15f, -15f, 6f, -6f, 0f)
         shake.duration = 600
         shake.start()
     }

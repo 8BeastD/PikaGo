@@ -6,7 +6,9 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.MediaStore
 import android.view.View
-import android.widget.*
+import android.widget.EditText
+import android.widget.Switch
+import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.core.content.ContextCompat
@@ -23,7 +25,10 @@ import com.leoworks.pikago.adapters.ProfileSectionAdapter
 import com.leoworks.pikago.models.*
 import com.leoworks.pikago.repository.ProfileRepository
 import io.github.jan.supabase.auth.auth
+import io.github.jan.supabase.postgrest.from
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class ProfileFragment : Fragment(R.layout.fragment_profile) {
 
@@ -58,6 +63,16 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
         }
     }
 
+    // Activity result launcher for profile activities
+    private val profileActivityLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            // Refresh the profile data when returning from any profile activity
+            loadProfileData()
+        }
+    }
+
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
@@ -68,6 +83,12 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
         animateEntrance(view)
         loadProfileData()
         setupClickListeners(view)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Refresh data when fragment becomes visible again
+        loadProfileData()
     }
 
     private fun initializeViews(view: View) {
@@ -85,7 +106,6 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
     }
 
     private fun setupRecyclerViews() {
-        // Profile sections
         profileSectionAdapter = ProfileSectionAdapter { section ->
             handleProfileSectionClick(section)
         }
@@ -94,7 +114,6 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
             adapter = profileSectionAdapter
         }
 
-        // Documents
         documentAdapter = DocumentAdapter { documentType ->
             handleDocumentUpload(documentType)
         }
@@ -104,14 +123,76 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
         }
     }
 
-    // Replace the loadProfileData method in your ProfileFragment with this simplified version:
+    /**
+     * Bootstraps the profile on first login:
+     * - upsert into public.users (by id)
+     * - ensure a delivery_partners row exists for this user_id
+     * Returns the DeliveryPartner row.
+     */
+    private suspend fun ensureUserAndPartner(): DeliveryPartner? = withContext(Dispatchers.IO) {
+        val authUser = App.supabase.auth.currentUserOrNull()
+            ?: throw IllegalStateException("Not logged in")
 
+        // 1) Upsert users row (minimal columns to avoid schema mismatch)
+        try {
+            val userPayload = mapOf(
+                "id" to authUser.id,
+                "email" to (authUser.email ?: ""),
+                "phone" to authUser.phone
+            )
+            App.supabase.from("users").upsert(userPayload) {
+                onConflict = "id"
+                ignoreDuplicates = true
+            }
+        } catch (_: Exception) {
+            // If RLS blocks this, consider adding a trigger in DB. We continue anyway.
+        }
+
+        // 2) Fetch partner
+        val existing = try {
+            App.supabase.from("delivery_partners")
+                .select {
+                    filter { eq("user_id", authUser.id) }
+                }
+                .decodeList<DeliveryPartner>()
+                .firstOrNull()
+        } catch (e: Exception) {
+            null
+        }
+        if (existing != null) return@withContext existing
+
+        // 3) Create minimal partner row (let DB defaults fill the rest)
+        return@withContext try {
+            val insertPayload = mapOf(
+                "user_id" to authUser.id,
+                "verification_status" to "pending",
+                "is_available" to false
+            )
+            App.supabase.from("delivery_partners")
+                .insert(insertPayload) { select() }
+                .decodeSingle<DeliveryPartner>()
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    // Simplified loader that bootstraps if needed
     private fun loadProfileData() {
         lifecycleScope.launch {
             try {
                 showLoading(true)
 
-                currentDeliveryPartner = profileRepository.getDeliveryPartner()
+                // Try repo first
+                currentDeliveryPartner = try {
+                    profileRepository.getDeliveryPartner()
+                } catch (_: Exception) {
+                    null
+                }
+
+                // If missing, self-heal by creating rows
+                if (currentDeliveryPartner == null) {
+                    currentDeliveryPartner = ensureUserAndPartner()
+                }
 
                 if (currentDeliveryPartner != null) {
                     updateUI()
@@ -119,6 +200,7 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
                     updateProfileSections()
                 } else {
                     showError("Failed to load or create profile")
+                    showCreateProfileDialog()
                 }
 
             } catch (e: Exception) {
@@ -131,40 +213,49 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
 
     private fun updateUI() {
         currentDeliveryPartner?.let { partner ->
-            tvName.text = "${partner.first_name} ${partner.last_name}"
+            tvName.text = listOf(partner.first_name, partner.last_name)
+                .filter { it.isNotBlank() }
+                .joinToString(" ")
+                .ifBlank { "Update your name" }
 
-            val user = App.supabase.auth.currentUserOrNull()
-            tvPhone.text = user?.phone ?: "Not available"
+            val authUser = App.supabase.auth.currentUserOrNull()
+            tvPhone.text = authUser?.phone ?: authUser?.email ?: "Not available"
 
-            // Update verification status
             when (partner.verification_status) {
                 "pending" -> {
                     tvVerificationStatus.text = "Verification Pending"
-                    tvVerificationStatus.setTextColor(ContextCompat.getColor(requireContext(), android.R.color.holo_orange_dark))
+                    tvVerificationStatus.setTextColor(
+                        ContextCompat.getColor(requireContext(), android.R.color.holo_orange_dark)
+                    )
                 }
                 "in_progress" -> {
                     tvVerificationStatus.text = "Under Review"
-                    tvVerificationStatus.setTextColor(ContextCompat.getColor(requireContext(), android.R.color.holo_blue_dark))
+                    tvVerificationStatus.setTextColor(
+                        ContextCompat.getColor(requireContext(), android.R.color.holo_blue_dark)
+                    )
                 }
                 "verified" -> {
                     tvVerificationStatus.text = "✓ Verified"
-                    tvVerificationStatus.setTextColor(ContextCompat.getColor(requireContext(), android.R.color.holo_green_dark))
+                    tvVerificationStatus.setTextColor(
+                        ContextCompat.getColor(requireContext(), android.R.color.holo_green_dark)
+                    )
                 }
                 "rejected" -> {
                     tvVerificationStatus.text = "Verification Failed"
-                    tvVerificationStatus.setTextColor(ContextCompat.getColor(requireContext(), android.R.color.holo_red_dark))
+                    tvVerificationStatus.setTextColor(
+                        ContextCompat.getColor(requireContext(), android.R.color.holo_red_dark)
+                    )
+                }
+                else -> {
+                    tvVerificationStatus.text = partner.verification_status
                 }
             }
 
-            // Update progress
             val progress = partner.profile_completion_percentage
             progressProfile.progress = progress
             tvProgressText.text = "$progress% Complete"
 
-            // Show/hide completion card
             cardProfileCompletion.visibility = if (progress < 100) View.VISIBLE else View.GONE
-
-            // Set availability switch
             switchAvailable.isChecked = partner.is_available
         }
     }
@@ -190,22 +281,58 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
                     it.first_name.isNotEmpty() && it.last_name.isNotEmpty() &&
                             it.address_line1.isNotEmpty()
                 } ?: false
-                sections.add(ProfileSection("Basic Information", basicComplete, if (basicComplete) 100 else 50))
+                sections.add(
+                    ProfileSection(
+                        "Basic Information",
+                        basicComplete,
+                        if (basicComplete) 100 else 50
+                    )
+                )
 
-                // Bank Details
-                val bankDetails = profileRepository.getBankDetails()
-                sections.add(ProfileSection("Bank Details", bankDetails != null, if (bankDetails != null) 100 else 0))
+                // Bank Details - Check if actually exists in database
+                val bankDetails = try {
+                    profileRepository.getBankDetails()
+                } catch (e: Exception) {
+                    null
+                }
+                sections.add(
+                    ProfileSection(
+                        "Bank Details",
+                        bankDetails != null,
+                        if (bankDetails != null) 100 else 0
+                    )
+                )
 
                 // Vehicle Details
-                val vehicleDetails = profileRepository.getVehicleDetails()
-                sections.add(ProfileSection("Vehicle Information", vehicleDetails != null, if (vehicleDetails != null) 100 else 0))
+                val vehicleDetails = try {
+                    profileRepository.getVehicleDetails()
+                } catch (e: Exception) {
+                    null
+                }
+                sections.add(
+                    ProfileSection(
+                        "Vehicle Information",
+                        vehicleDetails != null,
+                        if (vehicleDetails != null) 100 else 0
+                    )
+                )
 
                 // Documents
-                val documents = profileRepository.getVerificationDocuments()
+                val documents = try {
+                    profileRepository.getVerificationDocuments()
+                } catch (e: Exception) {
+                    emptyList()
+                }
                 val requiredDocs = 3 // Aadhar, PAN, Driving License
                 val completedDocs = documents.size
                 val docProgress = if (requiredDocs > 0) (completedDocs * 100) / requiredDocs else 0
-                sections.add(ProfileSection("Identity Documents", completedDocs >= requiredDocs, docProgress))
+                sections.add(
+                    ProfileSection(
+                        "Identity Documents",
+                        completedDocs >= requiredDocs,
+                        docProgress
+                    )
+                )
 
                 profileSectionAdapter.updateSections(sections)
 
@@ -216,7 +343,6 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
     }
 
     private fun setupClickListeners(view: View) {
-        // Availability toggle
         switchAvailable.setOnCheckedChangeListener { _, isChecked ->
             lifecycleScope.launch {
                 try {
@@ -233,30 +359,32 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
             }
         }
 
-        // Complete Profile button
         btnCompleteProfile.setOnClickListener {
-            startActivity(Intent(requireContext(), ProfileSetupActivity::class.java))
+            profileActivityLauncher.launch(Intent(requireContext(), ProfileSetupActivity::class.java))
         }
 
-        // Logout
-        btnLogout.setOnClickListener {
-            showLogoutDialog()
-        }
+        btnLogout.setOnClickListener { showLogoutDialog() }
     }
 
     private fun handleProfileSectionClick(section: ProfileSection) {
         when (section.title) {
             "Basic Information" -> {
-                startActivity(Intent(requireContext(), BasicProfileActivity::class.java))
+                // ✅ FIX: open ProfileSetupActivity (not BasicProfileActivity)
+                profileActivityLauncher.launch(
+                    Intent(requireContext(), ProfileSetupActivity::class.java)
+                )
             }
             "Bank Details" -> {
-                startActivity(Intent(requireContext(), BankDetailsActivity::class.java))
+                profileActivityLauncher.launch(
+                    Intent(requireContext(), BankDetailsActivity::class.java)
+                )
             }
             "Vehicle Information" -> {
-                startActivity(Intent(requireContext(), VehicleDetailsActivity::class.java))
+                profileActivityLauncher.launch(
+                    Intent(requireContext(), VehicleDetailsActivity::class.java)
+                )
             }
             "Identity Documents" -> {
-                // Show document upload options
                 showDocumentUploadOptions()
             }
         }
@@ -331,7 +459,7 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
             .setTitle("Complete Your Profile")
             .setMessage("Please complete your delivery partner profile to start receiving orders.")
             .setPositiveButton("Complete Now") { _, _ ->
-                startActivity(Intent(requireContext(), ProfileSetupActivity::class.java))
+                profileActivityLauncher.launch(Intent(requireContext(), ProfileSetupActivity::class.java))
             }
             .setNegativeButton("Later", null)
             .setCancelable(false)
@@ -342,9 +470,7 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
         AlertDialog.Builder(requireContext())
             .setTitle("Logout")
             .setMessage("Are you sure you want to logout?")
-            .setPositiveButton("Logout") { _, _ ->
-                performLogout()
-            }
+            .setPositiveButton("Logout") { _, _ -> performLogout() }
             .setNegativeButton("Cancel", null)
             .show()
     }
@@ -353,12 +479,10 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
         lifecycleScope.launch {
             try {
                 App.supabase.auth.signOut()
-
                 val intent = Intent(requireContext(), LoginActivity::class.java)
                 intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
                 startActivity(intent)
                 requireActivity().finish()
-
             } catch (e: Exception) {
                 showError("Logout failed: ${e.message}")
             }
@@ -372,39 +496,31 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
                 progressProfile.progress = completion
                 tvProgressText.text = "$completion% Complete"
                 cardProfileCompletion.visibility = if (completion < 100) View.VISIBLE else View.GONE
-
                 updateProfileSections()
-            } catch (e: Exception) {
-                // Handle silently
-            }
+
+                // Refresh the current partner data to get updated completion percentage
+                currentDeliveryPartner = profileRepository.getDeliveryPartner()
+                updateUI()
+            } catch (_: Exception) { /* ignore */ }
         }
     }
 
     private fun animateEntrance(view: View) {
         view.alpha = 0f
         view.translationY = 50f
-        view.animate()
-            .alpha(1f)
-            .translationY(0f)
-            .setDuration(800)
-            .start()
+        view.animate().alpha(1f).translationY(0f).setDuration(800).start()
     }
 
     private fun showLoading(show: Boolean, message: String = "Loading...") {
-        // You can implement a loading dialog or progress bar here
         btnCompleteProfile.isEnabled = !show
         btnLogout.isEnabled = !show
     }
 
     private fun showError(message: String) {
-        view?.let {
-            Snackbar.make(it, message, Snackbar.LENGTH_LONG).show()
-        }
+        view?.let { Snackbar.make(it, message, Snackbar.LENGTH_LONG).show() }
     }
 
     private fun showSuccess(message: String) {
-        view?.let {
-            Snackbar.make(it, message, Snackbar.LENGTH_SHORT).show()
-        }
+        view?.let { Snackbar.make(it, message, Snackbar.LENGTH_SHORT).show() }
     }
 }

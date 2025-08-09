@@ -1,11 +1,208 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.constraintlayout.widget.ConstraintLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools"
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/main"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     tools:context=".VehicleDetailsActivity">
 
-  </androidx.constraintlayout.widget.ConstraintLayout>
+  <com.google.android.material.appbar.AppBarLayout
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:theme="@style/ThemeOverlay.AppCompat.Dark.ActionBar">
+
+    <com.google.android.material.appbar.MaterialToolbar
+        android:id="@+id/toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="?attr/actionBarSize"
+        android:background="?attr/colorPrimary"
+        app:title="Vehicle Details"
+        app:titleTextColor="@android:color/white" />
+
+  </com.google.android.material.appbar.AppBarLayout>
+
+  <androidx.core.widget.NestedScrollView
+      android:layout_width="match_parent"
+      android:layout_height="match_parent"
+      app:layout_behavior="@string/appbar_scrolling_view_behavior">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+      <com.google.android.material.card.MaterialCardView
+          android:layout_width="match_parent"
+          android:layout_height="wrap_content"
+          android:layout_marginBottom="16dp"
+          app:cardCornerRadius="12dp"
+          app:cardElevation="4dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+          <TextView
+              android:layout_width="match_parent"
+              android:layout_height="wrap_content"
+              android:text="Vehicle Information"
+              android:textAppearance="@style/TextAppearance.Material3.HeadlineSmall"
+              android:textColor="?attr/colorOnSurface"
+              android:layout_marginBottom="8dp" />
+
+          <TextView
+              android:layout_width="match_parent"
+              android:layout_height="wrap_content"
+              android:text="Provide your vehicle details for delivery purposes"
+              android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+              android:textColor="?attr/colorOnSurfaceVariant"
+              android:layout_marginBottom="16dp" />
+
+          <!-- Vehicle Type -->
+          <com.google.android.material.textfield.TextInputLayout
+              android:id="@+id/tilVehicleType"
+              style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+              android:layout_width="match_parent"
+              android:layout_height="wrap_content"
+              android:layout_marginBottom="16dp"
+              android:hint="Vehicle Type *">
+
+            <com.google.android.material.textfield.MaterialAutoCompleteTextView
+                android:id="@+id/acVehicleType"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="none" />
+
+          </com.google.android.material.textfield.TextInputLayout>
+
+          <!-- Vehicle Make -->
+          <com.google.android.material.textfield.TextInputLayout
+              android:id="@+id/tilVehicleMake"
+              style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+              android:layout_width="match_parent"
+              android:layout_height="wrap_content"
+              android:layout_marginBottom="16dp"
+              android:hint="Vehicle Make *">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/etVehicleMake"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="textCapWords"
+                android:maxLines="1" />
+
+          </com.google.android.material.textfield.TextInputLayout>
+
+          <!-- Vehicle Model -->
+          <com.google.android.material.textfield.TextInputLayout
+              android:id="@+id/tilVehicleModel"
+              style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+              android:layout_width="match_parent"
+              android:layout_height="wrap_content"
+              android:layout_marginBottom="16dp"
+              android:hint="Vehicle Model *">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/etVehicleModel"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="textCapWords"
+                android:maxLines="1" />
+
+          </com.google.android.material.textfield.TextInputLayout>
+
+          <!-- Vehicle Number -->
+          <com.google.android.material.textfield.TextInputLayout
+              android:id="@+id/tilVehicleNumber"
+              style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+              android:layout_width="match_parent"
+              android:layout_height="wrap_content"
+              android:layout_marginBottom="16dp"
+              android:hint="Vehicle Number *">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/etVehicleNumber"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="textCapCharacters"
+                android:maxLines="1" />
+
+          </com.google.android.material.textfield.TextInputLayout>
+
+          <!-- Vehicle Color -->
+          <com.google.android.material.textfield.TextInputLayout
+              android:id="@+id/tilVehicleColor"
+              style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+              android:layout_width="match_parent"
+              android:layout_height="wrap_content"
+              android:layout_marginBottom="16dp"
+              android:hint="Vehicle Color *">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/etVehicleColor"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="textCapWords"
+                android:maxLines="1" />
+
+          </com.google.android.material.textfield.TextInputLayout>
+
+          <!-- Registration Year -->
+          <com.google.android.material.textfield.TextInputLayout
+              android:id="@+id/tilRegistrationYear"
+              style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+              android:layout_width="match_parent"
+              android:layout_height="wrap_content"
+              android:layout_marginBottom="24dp"
+              android:hint="Registration Year">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/etRegistrationYear"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="number"
+                android:maxLines="1"
+                android:maxLength="4" />
+
+          </com.google.android.material.textfield.TextInputLayout>
+
+        </LinearLayout>
+
+      </com.google.android.material.card.MaterialCardView>
+
+      <!-- Action Buttons -->
+      <LinearLayout
+          android:layout_width="match_parent"
+          android:layout_height="wrap_content"
+          android:orientation="horizontal"
+          android:gravity="end"
+          android:layout_marginTop="16dp">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnSkip"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="8dp"
+            android:text="Skip"
+            android:textColor="?attr/colorOnSurfaceVariant" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnSaveVehicle"
+            style="@style/Widget.Material3.Button"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Save Vehicle"
+            android:minWidth="120dp" />
+
+      </LinearLayout>
+
+    </LinearLayout>
+
+  </androidx.core.widget.NestedScrollView>
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

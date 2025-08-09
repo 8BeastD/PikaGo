@@ -11,7 +11,9 @@ import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.textfield.MaterialAutoCompleteTextView
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
+import com.leoworks.pikago.models.DeliveryPartner
 import com.leoworks.pikago.repository.ProfileRepository
+import io.github.jan.supabase.auth.auth
 import kotlinx.coroutines.launch
 
 class ProfileSetupActivity : AppCompatActivity() {
@@ -39,6 +41,7 @@ class ProfileSetupActivity : AppCompatActivity() {
     private lateinit var pincodeLayout: TextInputLayout
 
     private lateinit var profileRepository: ProfileRepository
+    private var existingProfile: DeliveryPartner? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -53,6 +56,49 @@ class ProfileSetupActivity : AppCompatActivity() {
         setupClickListeners()
 
         profileRepository = ProfileRepository(this)
+
+        // Load existing profile data
+        loadExistingProfile()
+    }
+
+    private fun loadExistingProfile() {
+        lifecycleScope.launch {
+            try {
+                setLoading(true)
+                existingProfile = profileRepository.getDeliveryPartner()
+
+                existingProfile?.let { profile ->
+                    // Pre-fill existing data
+                    etFirstName.setText(profile.first_name)
+                    etLastName.setText(profile.last_name)
+                    etDateOfBirth.setText(profile.date_of_birth ?: "")
+                    if (!profile.gender.isNullOrEmpty()) {
+                        acGender.setText(profile.gender, false)
+                    }
+                    etAddressLine1.setText(profile.address_line1)
+                    etAddressLine2.setText(profile.address_line2 ?: "")
+                    etCity.setText(profile.city)
+                    if (!profile.state.isNullOrEmpty()) {
+                        acState.setText(profile.state, false)
+                    }
+                    etPincode.setText(profile.pincode)
+                    etEmergencyName.setText(profile.emergency_contact_name ?: "")
+                    etEmergencyPhone.setText(profile.emergency_contact_phone ?: "")
+
+                    // Get phone from auth user
+                    val authUser = App.supabase.auth.currentUserOrNull()
+                    etPhone.setText(authUser?.phone ?: "")
+
+                    // Update UI for existing profile
+                    supportActionBar?.title = "Update Your Profile"
+                    btnSaveProfile.text = "Update Profile"
+                }
+            } catch (e: Exception) {
+                showError("Failed to load existing profile: ${e.message}")
+            } finally {
+                setLoading(false)
+            }
+        }
     }
 
     private fun initializeViews() {
@@ -249,9 +295,6 @@ class ProfileSetupActivity : AppCompatActivity() {
             try {
                 setLoading(true)
 
-                // Check if profile already exists
-                val existingProfile = profileRepository.getDeliveryPartner()
-
                 if (existingProfile == null) {
                     // Create new profile
                     profileRepository.createDeliveryPartner(
@@ -265,7 +308,7 @@ class ProfileSetupActivity : AppCompatActivity() {
                     )
                 } else {
                     // Update existing profile
-                    val updatedProfile = existingProfile.copy(
+                    val updatedProfile = existingProfile!!.copy(
                         first_name = firstName,
                         last_name = lastName,
                         date_of_birth = dateOfBirth,
@@ -281,10 +324,14 @@ class ProfileSetupActivity : AppCompatActivity() {
                     profileRepository.updateDeliveryPartner(updatedProfile)
                 }
 
+                // Recalculate completion after saving
+                profileRepository.calculateProfileCompletion()
+
                 showSuccess("Profile saved successfully!")
 
                 // Delay to show success message then finish
                 kotlinx.coroutines.delay(1500)
+                setResult(RESULT_OK)
                 finish()
 
             } catch (e: Exception) {
@@ -300,9 +347,9 @@ class ProfileSetupActivity : AppCompatActivity() {
         btnSkip.isEnabled = !loading
 
         if (loading) {
-            btnSaveProfile.text = "Saving..."
+            btnSaveProfile.text = if (existingProfile != null) "Updating..." else "Saving..."
         } else {
-            btnSaveProfile.text = "Save Profile"
+            btnSaveProfile.text = if (existingProfile != null) "Update Profile" else "Save Profile"
         }
     }
 

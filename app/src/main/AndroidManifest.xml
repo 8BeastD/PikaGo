@@ -24,6 +24,9 @@
             android:name=".BankDetailsActivity"
             android:exported="false" />
         <activity
+            android:name=".ProfileSetupActivity"
+            android:exported="false" />
+        <activity
             android:name=".BasicProfileActivity"
             android:exported="false" />
         <activity
