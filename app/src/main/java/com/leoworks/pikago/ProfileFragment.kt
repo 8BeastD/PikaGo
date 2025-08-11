@@ -119,14 +119,8 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
         setupClickListeners(view)
     }
 
-    override fun onResume() {
-        super.onResume()
-        // Refresh data when fragment becomes visible again
-        loadProfileData()
-    }
-
     private fun initializeViews(view: View) {
-        ivProfileImage = view.findViewById(R.id.ivProfilePhoto) // Use your existing ID
+        ivProfileImage = view.findViewById(R.id.ivProfilePhoto)
         tvName = view.findViewById(R.id.tvName)
         tvPhone = view.findViewById(R.id.tvPhone)
         tvVerificationStatus = view.findViewById(R.id.tvVerificationStatus)
@@ -158,17 +152,37 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
         }
     }
 
-    /**
-     * Bootstraps the profile on first login:
-     * - upsert into public.users (by id)
-     * - ensure a delivery_partners row exists for this user_id
-     * Returns the DeliveryPartner row.
-     */
+    private fun checkAuthenticationAndRedirect(): Boolean {
+        val user = App.supabase.auth.currentUserOrNull()
+        if (user == null) {
+            showAuthenticationError()
+            return false
+        }
+        return true
+    }
+
+    private fun showAuthenticationError() {
+        AlertDialog.Builder(requireContext())
+            .setTitle("Session Expired")
+            .setMessage("Your session has expired. Please login again.")
+            .setPositiveButton("Login") { _, _ ->
+                redirectToLogin()
+            }
+            .setCancelable(false)
+            .show()
+    }
+
+    private fun redirectToLogin() {
+        val intent = Intent(requireContext(), LoginActivity::class.java)
+        intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+        startActivity(intent)
+        requireActivity().finish()
+    }
+
     private suspend fun ensureUserAndPartner(): DeliveryPartner? = withContext(Dispatchers.IO) {
         val authUser = App.supabase.auth.currentUserOrNull()
             ?: throw IllegalStateException("Not logged in")
 
-        // 1) Upsert users row (minimal columns to avoid schema mismatch)
         try {
             val userPayload = mapOf(
                 "id" to authUser.id,
@@ -180,10 +194,9 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
                 ignoreDuplicates = true
             }
         } catch (_: Exception) {
-            // If RLS blocks this, consider adding a trigger in DB. We continue anyway.
+            // Continue if RLS blocks this
         }
 
-        // 2) Fetch partner
         val existing = try {
             App.supabase.from("delivery_partners")
                 .select {
@@ -196,7 +209,6 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
         }
         if (existing != null) return@withContext existing
 
-        // 3) Create minimal partner row (let DB defaults fill the rest)
         return@withContext try {
             val insertPayload = mapOf(
                 "user_id" to authUser.id,
@@ -211,20 +223,25 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
         }
     }
 
-    // Simplified loader that bootstraps if needed
     private fun loadProfileData() {
+        if (!checkAuthenticationAndRedirect()) return
+
         lifecycleScope.launch {
             try {
                 showLoading(true)
 
-                // Try repo first
                 currentDeliveryPartner = try {
                     profileRepository.getDeliveryPartner()
-                } catch (_: Exception) {
+                } catch (e: Exception) {
+                    if (e.message?.contains("login") == true) {
+                        withContext(Dispatchers.Main) {
+                            showAuthenticationError()
+                        }
+                        return@launch
+                    }
                     null
                 }
 
-                // If missing, self-heal by creating rows
                 if (currentDeliveryPartner == null) {
                     currentDeliveryPartner = ensureUserAndPartner()
                 }
@@ -233,13 +250,19 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
                     updateUI()
                     loadDocuments()
                     updateProfileSections()
+                    // Check and update verification status
+                    checkAndUpdateVerificationStatus()
                 } else {
                     showError("Failed to load or create profile")
                     showCreateProfileDialog()
                 }
 
             } catch (e: Exception) {
-                showError("Failed to load profile: ${e.message}")
+                if (e.message?.contains("login") == true || e.message?.contains("authenticated") == true) {
+                    showAuthenticationError()
+                } else {
+                    showError("Failed to load profile: ${e.message}")
+                }
             } finally {
                 showLoading(false)
             }
@@ -256,38 +279,8 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
             val authUser = App.supabase.auth.currentUserOrNull()
             tvPhone.text = authUser?.phone ?: authUser?.email ?: "Not available"
 
-            // Load profile image
             loadProfileImage(partner.profile_photo_url)
-
-            when (partner.verification_status) {
-                "pending" -> {
-                    tvVerificationStatus.text = "Verification Pending"
-                    tvVerificationStatus.setTextColor(
-                        ContextCompat.getColor(requireContext(), android.R.color.holo_orange_dark)
-                    )
-                }
-                "in_progress" -> {
-                    tvVerificationStatus.text = "Under Review"
-                    tvVerificationStatus.setTextColor(
-                        ContextCompat.getColor(requireContext(), android.R.color.holo_blue_dark)
-                    )
-                }
-                "verified" -> {
-                    tvVerificationStatus.text = "✓ Verified"
-                    tvVerificationStatus.setTextColor(
-                        ContextCompat.getColor(requireContext(), android.R.color.holo_green_dark)
-                    )
-                }
-                "rejected" -> {
-                    tvVerificationStatus.text = "Verification Failed"
-                    tvVerificationStatus.setTextColor(
-                        ContextCompat.getColor(requireContext(), android.R.color.holo_red_dark)
-                    )
-                }
-                else -> {
-                    tvVerificationStatus.text = partner.verification_status
-                }
-            }
+            updateVerificationStatusDisplay(partner.verification_status)
 
             val progress = partner.profile_completion_percentage
             progressProfile.progress = progress
@@ -298,17 +291,48 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
         }
     }
 
+    private fun updateVerificationStatusDisplay(status: String) {
+        when (status) {
+            "pending" -> {
+                tvVerificationStatus.text = "Verification Pending"
+                tvVerificationStatus.setTextColor(
+                    ContextCompat.getColor(requireContext(), android.R.color.holo_orange_dark)
+                )
+            }
+            "in_progress" -> {
+                tvVerificationStatus.text = "Under Review"
+                tvVerificationStatus.setTextColor(
+                    ContextCompat.getColor(requireContext(), android.R.color.holo_blue_dark)
+                )
+            }
+            "verified" -> {
+                tvVerificationStatus.text = "✓ Verified"
+                tvVerificationStatus.setTextColor(
+                    ContextCompat.getColor(requireContext(), android.R.color.holo_green_dark)
+                )
+            }
+            "rejected" -> {
+                tvVerificationStatus.text = "Verification Failed"
+                tvVerificationStatus.setTextColor(
+                    ContextCompat.getColor(requireContext(), android.R.color.holo_red_dark)
+                )
+            }
+            else -> {
+                tvVerificationStatus.text = status
+            }
+        }
+    }
+
     private fun loadProfileImage(imageUrl: String?) {
         if (!imageUrl.isNullOrEmpty()) {
             Glide.with(this)
                 .load(imageUrl)
                 .diskCacheStrategy(DiskCacheStrategy.ALL)
-                .placeholder(R.drawable.ic_profile_placeholder) // Use your existing drawable
+                .placeholder(R.drawable.ic_profile_placeholder)
                 .error(R.drawable.ic_profile_placeholder)
                 .circleCrop()
                 .into(ivProfileImage)
         } else {
-            // Set default avatar
             Glide.with(this)
                 .load(R.drawable.ic_profile_placeholder)
                 .circleCrop()
@@ -322,7 +346,11 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
                 val documents = profileRepository.getVerificationDocuments()
                 documentAdapter.updateDocuments(documents)
             } catch (e: Exception) {
-                showError("Failed to load documents: ${e.message}")
+                if (e.message?.contains("login") == true) {
+                    showAuthenticationError()
+                } else {
+                    showError("Failed to load documents: ${e.message}")
+                }
             }
         }
     }
@@ -345,10 +373,14 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
                     )
                 )
 
-                // Bank Details - Check if actually exists in database
+                // Bank Details
                 val bankDetails = try {
                     profileRepository.getBankDetails()
                 } catch (e: Exception) {
+                    if (e.message?.contains("login") == true) {
+                        showAuthenticationError()
+                        return@launch
+                    }
                     null
                 }
                 sections.add(
@@ -363,6 +395,10 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
                 val vehicleDetails = try {
                     profileRepository.getVehicleDetails()
                 } catch (e: Exception) {
+                    if (e.message?.contains("login") == true) {
+                        showAuthenticationError()
+                        return@launch
+                    }
                     null
                 }
                 sections.add(
@@ -377,9 +413,13 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
                 val documents = try {
                     profileRepository.getVerificationDocuments()
                 } catch (e: Exception) {
+                    if (e.message?.contains("login") == true) {
+                        showAuthenticationError()
+                        return@launch
+                    }
                     emptyList()
                 }
-                val requiredDocs = 3 // Aadhar, PAN, Driving License
+                val requiredDocs = 3
                 val completedDocs = documents.size
                 val docProgress = if (requiredDocs > 0) (completedDocs * 100) / requiredDocs else 0
                 sections.add(
@@ -393,18 +433,28 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
                 profileSectionAdapter.updateSections(sections)
 
             } catch (e: Exception) {
-                showError("Failed to update profile sections: ${e.message}")
+                if (e.message?.contains("login") == true) {
+                    showAuthenticationError()
+                } else {
+                    showError("Failed to update profile sections: ${e.message}")
+                }
             }
         }
     }
 
     private fun setupClickListeners(view: View) {
-        // Profile image click listener
         ivProfileImage.setOnClickListener {
-            showImageUploadOptions()
+            if (checkAuthenticationAndRedirect()) {
+                showImageUploadOptions()
+            }
         }
 
         switchAvailable.setOnCheckedChangeListener { _, isChecked ->
+            if (!checkAuthenticationAndRedirect()) {
+                switchAvailable.isChecked = !isChecked
+                return@setOnCheckedChangeListener
+            }
+
             lifecycleScope.launch {
                 try {
                     profileRepository.updateAvailabilityStatus(isChecked)
@@ -415,16 +465,29 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
                     ).show()
                 } catch (e: Exception) {
                     switchAvailable.isChecked = !isChecked
-                    showError("Failed to update availability")
+                    if (e.message?.contains("login") == true) {
+                        showAuthenticationError()
+                    } else {
+                        showError("Failed to update availability")
+                    }
                 }
             }
         }
 
         btnCompleteProfile.setOnClickListener {
-            profileActivityLauncher.launch(Intent(requireContext(), ProfileSetupActivity::class.java))
+            if (checkAuthenticationAndRedirect()) {
+                profileActivityLauncher.launch(Intent(requireContext(), ProfileSetupActivity::class.java))
+            }
         }
 
         btnLogout.setOnClickListener { showLogoutDialog() }
+
+        // Add verification check button (you can add this to your layout or make it a menu item)
+        tvVerificationStatus.setOnClickListener {
+            if (checkAuthenticationAndRedirect()) {
+                checkAndUpdateVerificationStatus()
+            }
+        }
     }
 
     private fun showImageUploadOptions() {
@@ -492,31 +555,46 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
             try {
                 showLoading(true, "Uploading profile picture...")
 
-                val imageUrl = profileRepository.uploadProfileImage(imageUri)
+                val signedUrl = profileRepository.uploadProfileImage(imageUri)
+                profileRepository.updateProfileImage(signedUrl)
 
-                // Update the delivery partner with new image URL
-                profileRepository.updateProfileImage(imageUrl)
-
-                // Refresh current partner data
                 currentDeliveryPartner = profileRepository.getDeliveryPartner()
-
-                // Update UI
-                loadProfileImage(imageUrl)
+                loadProfileImage(signedUrl)
 
                 showSuccess("Profile picture updated successfully!")
 
+                // Update verification status after profile image upload
+                checkAndUpdateVerificationStatus()
             } catch (e: Exception) {
-                showError("Failed to upload profile picture: ${e.message}")
+                if (e.message?.contains("login", ignoreCase = true) == true) {
+                    showAuthenticationError()
+                } else {
+                    showError("Failed to upload profile picture: ${e.message}")
+                }
             } finally {
                 showLoading(false)
             }
         }
     }
 
+    private fun showStorageConfigurationDialog() {
+        AlertDialog.Builder(requireContext())
+            .setTitle("Storage Configuration Required")
+            .setMessage("The storage buckets are not configured properly. Please:\n\n" +
+                    "1. Go to Supabase Dashboard\n" +
+                    "2. Navigate to Storage\n" +
+                    "3. Create buckets: 'profile-images' and 'documents'\n" +
+                    "4. Make them public or configure proper RLS policies\n\n" +
+                    "Contact your developer if you need help.")
+            .setPositiveButton("OK", null)
+            .show()
+    }
+
     private fun handleProfileSectionClick(section: ProfileSection) {
+        if (!checkAuthenticationAndRedirect()) return
+
         when (section.title) {
             "Basic Information" -> {
-                // ✅ FIX: open ProfileSetupActivity (not BasicProfileActivity)
                 profileActivityLauncher.launch(
                     Intent(requireContext(), ProfileSetupActivity::class.java)
                 )
@@ -538,6 +616,8 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
     }
 
     private fun handleDocumentUpload(documentType: String) {
+        if (!checkAuthenticationAndRedirect()) return
+
         selectedDocumentType = documentType
         val intent = Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
         imagePickerLauncher.launch(intent)
@@ -592,9 +672,17 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
                 showSuccess("Document uploaded successfully!")
                 loadDocuments()
                 updateProfileCompletion()
+                // Check verification status after document upload
+                checkAndUpdateVerificationStatus()
 
             } catch (e: Exception) {
-                showError("Failed to upload document: ${e.message}")
+                if (e.message?.contains("login") == true || e.message?.contains("authenticated") == true) {
+                    showAuthenticationError()
+                } else if (e.message?.contains("bucket") == true || e.message?.contains("Storage") == true) {
+                    showStorageConfigurationDialog()
+                } else {
+                    showError("Failed to upload document: ${e.message}")
+                }
             } finally {
                 showLoading(false)
             }
@@ -606,7 +694,9 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
             .setTitle("Complete Your Profile")
             .setMessage("Please complete your delivery partner profile to start receiving orders.")
             .setPositiveButton("Complete Now") { _, _ ->
-                profileActivityLauncher.launch(Intent(requireContext(), ProfileSetupActivity::class.java))
+                if (checkAuthenticationAndRedirect()) {
+                    profileActivityLauncher.launch(Intent(requireContext(), ProfileSetupActivity::class.java))
+                }
             }
             .setNegativeButton("Later", null)
             .setCancelable(false)
@@ -639,16 +729,47 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
     private fun updateProfileCompletion() {
         lifecycleScope.launch {
             try {
-                val completion = profileRepository.calculateProfileCompletion()
+                val (completion, verificationStatus) = profileRepository.calculateProfileCompletionAndVerification()
+
                 progressProfile.progress = completion
                 tvProgressText.text = "$completion% Complete"
                 cardProfileCompletion.visibility = if (completion < 100) View.VISIBLE else View.GONE
+
+                updateVerificationStatusDisplay(verificationStatus)
                 updateProfileSections()
 
-                // Refresh the current partner data to get updated completion percentage
                 currentDeliveryPartner = profileRepository.getDeliveryPartner()
                 updateUI()
-            } catch (_: Exception) { /* ignore */ }
+            } catch (e: Exception) {
+                if (e.message?.contains("login") == true) {
+                    showAuthenticationError()
+                }
+            }
+        }
+    }
+
+    // NEW METHOD: Check and update verification status
+    private fun checkAndUpdateVerificationStatus() {
+        lifecycleScope.launch {
+            try {
+                val newStatus = profileRepository.updateVerificationStatus()
+                updateVerificationStatusDisplay(newStatus)
+
+                currentDeliveryPartner = profileRepository.getDeliveryPartner()
+                updateUI()
+
+                if (newStatus == "verified") {
+                    showSuccess("Congratulations! Your profile has been verified.")
+                } else if (newStatus == "in_progress") {
+                    showSuccess("Your profile is under review.")
+                }
+
+            } catch (e: Exception) {
+                if (e.message?.contains("login") == true) {
+                    showAuthenticationError()
+                }
+                // Don't show error for verification check failures
+            }
         }
     }
 
@@ -662,13 +783,30 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
         btnCompleteProfile.isEnabled = !show
         btnLogout.isEnabled = !show
         ivProfileImage.isClickable = !show
+        switchAvailable.isEnabled = !show
     }
 
     private fun showError(message: String) {
-        view?.let { Snackbar.make(it, message, Snackbar.LENGTH_LONG).show() }
+        view?.let {
+            Snackbar.make(it, message, Snackbar.LENGTH_LONG)
+                .setAction("Retry") { loadProfileData() }
+                .show()
+        }
     }
 
     private fun showSuccess(message: String) {
         view?.let { Snackbar.make(it, message, Snackbar.LENGTH_SHORT).show() }
+    }
+
+    override fun onResume() {
+        super.onResume()
+
+        lifecycleScope.launch {
+            runCatching {
+                App.supabase.auth.loadFromStorage()
+                App.supabase.auth.refreshCurrentSession()
+            }
+            loadProfileData()
+        }
     }
 }

@@ -21,7 +21,10 @@ class PikaGoApp : Application() {
             supabaseUrl = "https://grhktiznwdgglzqghjgj.supabase.co",
             supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdyaGt0aXpud2RnZ2x6cWdoamdqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQzNzU2ODEsImV4cCI6MjA2OTk1MTY4MX0.hjNpd26-8GDXnXvha6zdN3DciaRmRnubNhvwnFxnXtk"
         ) {
-            install(Auth)
+            install(Auth){
+                alwaysAutoRefresh = true          // ✅ keep token fresh
+                autoLoadFromStorage = true
+            }
             install(Postgrest)
             install(Storage)
             install(Realtime)

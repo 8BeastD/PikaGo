@@ -1,3 +1,6 @@
+// ProfileRepository.kt - Complete updated version
+// =============================================================================
+
 package com.leoworks.pikago.repository
 
 import android.content.Context
@@ -6,7 +9,9 @@ import com.leoworks.pikago.App
 import com.leoworks.pikago.models.*
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
+import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.storage.storage
+import io.ktor.http.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
@@ -16,13 +21,57 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import java.io.InputStream
 import java.util.UUID
+import kotlin.time.Duration.Companion.days
 
 class ProfileRepository(private val context: Context) {
 
-    /* ------------------------------- Queries ------------------------------- */
+    private suspend fun ensureAuthenticated(): Boolean = withContext(Dispatchers.IO) {
+        try {
+            var user = App.supabase.auth.currentUserOrNull()
+
+            if (user == null) {
+                runCatching { App.supabase.auth.loadFromStorage() }
+                user = App.supabase.auth.currentUserOrNull()
+            }
+
+            if (user == null) return@withContext false
+
+            suspend fun isQueryOK(): Boolean {
+                return runCatching {
+                    App.supabase.from("delivery_partners")
+                        .select(Columns.list("id")) {
+                            filter { eq("user_id", user!!.id) }
+                        }
+                    true
+                }.getOrElse { false }
+            }
+
+            if (isQueryOK()) return@withContext true
+
+            runCatching { App.supabase.auth.refreshCurrentSession() }
+            user = App.supabase.auth.currentUserOrNull() ?: return@withContext false
+
+            return@withContext isQueryOK()
+
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    suspend fun isSessionValid(): Boolean {
+        return try {
+            ensureAuthenticated()
+        } catch (e: Exception) {
+            false
+        }
+    }
 
     suspend fun getDeliveryPartner(): DeliveryPartner? = withContext(Dispatchers.IO) {
         try {
+            if (!ensureAuthenticated()) {
+                throw Exception("Please login again")
+            }
+
             val userId = App.supabase.auth.currentUserOrNull()?.id ?: return@withContext null
 
             val result = App.supabase.from("delivery_partners")
@@ -31,18 +80,23 @@ class ProfileRepository(private val context: Context) {
                 }
                 .decodeSingleOrNull<DeliveryPartner>()
 
-            // If no delivery partner exists, create one
             result ?: createDeliveryPartnerRecord()
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            if (e.message?.contains("login") == true) {
+                throw e
+            }
             null
         }
     }
 
     suspend fun createDeliveryPartnerRecord(): DeliveryPartner = withContext(Dispatchers.IO) {
+        if (!ensureAuthenticated()) {
+            throw Exception("Please login again")
+        }
+
         val user = App.supabase.auth.currentUserOrNull()
             ?: throw Exception("User not authenticated")
 
-        // Upsert into users (JsonObject -> no custom serializer needed)
         runCatching {
             val usersUpsert = buildJsonObject {
                 put("id", JsonPrimitive(user.id))
@@ -55,7 +109,6 @@ class ProfileRepository(private val context: Context) {
             }
         }
 
-        // Minimal partner bootstrap
         val partnerBootstrap = buildJsonObject {
             put("user_id", JsonPrimitive(user.id))
             put("first_name", JsonPrimitive(""))
@@ -83,10 +136,13 @@ class ProfileRepository(private val context: Context) {
         state: String,
         pincode: String
     ): DeliveryPartner = withContext(Dispatchers.IO) {
+        if (!ensureAuthenticated()) {
+            throw Exception("Please login again")
+        }
+
         val user = App.supabase.auth.currentUserOrNull()
             ?: throw IllegalStateException("User not logged in")
 
-        // keep users table in sync (optional)
         runCatching {
             val usersUpsert = buildJsonObject {
                 put("id", JsonPrimitive(user.id))
@@ -117,6 +173,10 @@ class ProfileRepository(private val context: Context) {
 
     suspend fun updateDeliveryPartner(partner: DeliveryPartner): DeliveryPartner =
         withContext(Dispatchers.IO) {
+            if (!ensureAuthenticated()) {
+                throw Exception("Please login again")
+            }
+
             App.supabase.from("delivery_partners")
                 .update(partner) {
                     filter { eq("id", partner.id) }
@@ -126,6 +186,10 @@ class ProfileRepository(private val context: Context) {
         }
 
     suspend fun updateAvailabilityStatus(isAvailable: Boolean) = withContext(Dispatchers.IO) {
+        if (!ensureAuthenticated()) {
+            throw Exception("Please login again")
+        }
+
         val userId = App.supabase.auth.currentUserOrNull()?.id ?: return@withContext
 
         val body = buildJsonObject { put("is_available", JsonPrimitive(isAvailable)) }
@@ -136,66 +200,85 @@ class ProfileRepository(private val context: Context) {
             }
     }
 
-    /* ------------------------------- Profile Image Methods ------------------------------- */
+    private suspend fun ensureBucketExists(bucketName: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            App.supabase.storage.from(bucketName).list()
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
 
-    /**
-     * Uploads profile image to Supabase storage
-     */
     suspend fun uploadProfileImage(imageUri: Uri): String = withContext(Dispatchers.IO) {
         try {
+            if (!ensureAuthenticated()) {
+                throw Exception("Please login again to upload profile image")
+            }
+
             val authUser = App.supabase.auth.currentUserOrNull()
-                ?: throw IllegalStateException("User not logged in")
+                ?: throw Exception("User session expired. Please login again")
 
-            // Generate unique filename
             val fileName = "profile_${authUser.id}_${System.currentTimeMillis()}.jpg"
-            val bucketName = "profile-images" // Make sure this bucket exists in Supabase
+            val bucketName = "profile-images"
 
-            // Read image data using existing helper method
+            if (!ensureBucketExists(bucketName)) {
+                throw Exception("Storage not configured. Please create '$bucketName' bucket in Supabase dashboard")
+            }
+
             val imageBytes = readBytesFromUri(imageUri)
 
-            // Upload to Supabase Storage
-            App.supabase.storage[bucketName].upload(fileName, imageBytes) {
+            if (imageBytes.size > 5 * 1024 * 1024) {
+                throw Exception("Image size too large. Please select an image smaller than 5MB")
+            }
+            if (imageBytes.isEmpty()) {
+                throw Exception("Invalid image file. Please select a different image")
+            }
+
+            App.supabase.storage.from(bucketName).upload(fileName, imageBytes) {
                 upsert = true
+                contentType = ContentType.Image.JPEG
             }
 
-            // Get public URL
-            val publicUrl = App.supabase.storage[bucketName].publicUrl(fileName)
+            val signedUrl = App.supabase.storage.from(bucketName)
+                .createSignedUrl(fileName, 365.days)
 
-            return@withContext publicUrl
+            return@withContext signedUrl
 
         } catch (e: Exception) {
-            throw Exception("Failed to upload profile image: ${e.message}")
-        }
-    }
-
-    /**
-     * Updates the profile image URL in delivery_partners table
-     */
-    suspend fun updateProfileImage(imageUrl: String) = withContext(Dispatchers.IO) {
-        try {
-            val authUser = App.supabase.auth.currentUserOrNull()
-                ?: throw IllegalStateException("User not logged in")
-
-            val body = buildJsonObject {
-                put("profile_photo_url", JsonPrimitive(imageUrl)) // Use your existing field name
-            }
-
-            App.supabase.from("delivery_partners")
-                .update(body) {
-                    filter {
-                        eq("user_id", authUser.id)
-                    }
+            when {
+                e.message?.contains("not found") == true || e.message?.contains("bucket") == true -> {
+                    throw Exception("Storage bucket 'profile-images' not found. Please create it in Supabase dashboard.")
                 }
-
-        } catch (e: Exception) {
-            throw Exception("Failed to update profile image: ${e.message}")
+                e.message?.contains("login") == true || e.message?.contains("authenticated") == true -> {
+                    throw Exception("Please login again to upload images")
+                }
+                e.message?.contains("size") == true -> throw e
+                e.message?.contains("Invalid") == true -> throw e
+                else -> throw Exception("Upload failed: ${e.message}")
+            }
         }
     }
 
-    /* ------------------------------- Document Methods ------------------------------- */
+    suspend fun updateProfileImage(imageUrl: String) = withContext(Dispatchers.IO) {
+        if (!ensureAuthenticated()) throw Exception("Please login again")
+
+        val authUser = App.supabase.auth.currentUserOrNull()
+            ?: throw Exception("User session expired. Please login again")
+
+        val body = buildJsonObject {
+            put("profile_photo_url", JsonPrimitive(imageUrl))
+        }
+
+        App.supabase.from("delivery_partners")
+            .update(body) { filter { eq("user_id", authUser.id) } }
+    }
 
     suspend fun getVerificationDocuments(): List<VerificationDocument> = withContext(Dispatchers.IO) {
         try {
+            if (!ensureAuthenticated()) {
+                throw Exception("Please login again")
+            }
+
             val partner = getDeliveryPartner() ?: return@withContext emptyList()
 
             App.supabase.from("verification_documents")
@@ -203,7 +286,10 @@ class ProfileRepository(private val context: Context) {
                     filter { eq("delivery_partner_id", partner.id) }
                 }
                 .decodeList<VerificationDocument>()
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            if (e.message?.contains("login") == true) {
+                throw e
+            }
             emptyList()
         }
     }
@@ -213,20 +299,39 @@ class ProfileRepository(private val context: Context) {
         documentNumber: String,
         imageUri: Uri
     ): VerificationDocument = withContext(Dispatchers.IO) {
+        if (!ensureAuthenticated()) {
+            throw Exception("Please login again")
+        }
+
         val partner = getDeliveryPartner()
             ?: throw IllegalStateException("Delivery partner profile not found")
+
+        val bucketName = "documents"
+
+        if (!ensureBucketExists(bucketName)) {
+            throw Exception("Documents storage not configured. Please create '$bucketName' bucket in Supabase dashboard")
+        }
 
         val fileName = "${documentType}_${UUID.randomUUID()}.jpg"
         val bytes = readBytesFromUri(imageUri)
 
-        App.supabase.storage.from("documents").upload(fileName, bytes)
-        val documentUrl = App.supabase.storage.from("documents").publicUrl(fileName)
+        if (bytes.size > 10 * 1024 * 1024) {
+            throw Exception("Document size too large. Please select a smaller image")
+        }
+
+        App.supabase.storage.from(bucketName).upload(fileName, bytes) {
+            upsert = true
+            contentType = ContentType.Image.JPEG
+        }
+
+        val documentUrl = App.supabase.storage.from(bucketName).publicUrl(fileName)
 
         val body = buildJsonObject {
             put("delivery_partner_id", JsonPrimitive(partner.id))
             put("document_type", JsonPrimitive(documentType))
             put("document_number", JsonPrimitive(documentNumber))
             put("document_url", JsonPrimitive(documentUrl))
+            put("verification_status", JsonPrimitive("verified")) // Auto-verify for now
         }
 
         App.supabase.from("verification_documents")
@@ -234,10 +339,12 @@ class ProfileRepository(private val context: Context) {
             .decodeSingle<VerificationDocument>()
     }
 
-    /* ------------------------------- Bank Details Methods ------------------------------- */
-
     suspend fun getBankDetails(): BankDetails? = withContext(Dispatchers.IO) {
         try {
+            if (!ensureAuthenticated()) {
+                throw Exception("Please login again")
+            }
+
             val partner = getDeliveryPartner() ?: return@withContext null
 
             App.supabase.from("bank_details")
@@ -245,7 +352,10 @@ class ProfileRepository(private val context: Context) {
                     filter { eq("delivery_partner_id", partner.id) }
                 }
                 .decodeSingleOrNull<BankDetails>()
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            if (e.message?.contains("login") == true) {
+                throw e
+            }
             null
         }
     }
@@ -257,6 +367,10 @@ class ProfileRepository(private val context: Context) {
         bankName: String,
         branchName: String? = null
     ): BankDetails = withContext(Dispatchers.IO) {
+        if (!ensureAuthenticated()) {
+            throw Exception("Please login again")
+        }
+
         val partner = getDeliveryPartner()
             ?: throw IllegalStateException("Delivery partner profile not found")
 
@@ -282,6 +396,10 @@ class ProfileRepository(private val context: Context) {
         bankName: String,
         branchName: String? = null
     ): BankDetails = withContext(Dispatchers.IO) {
+        if (!ensureAuthenticated()) {
+            throw Exception("Please login again")
+        }
+
         val body = buildJsonObject {
             put("account_holder_name", JsonPrimitive(accountHolderName))
             put("account_number", JsonPrimitive(accountNumber))
@@ -298,10 +416,12 @@ class ProfileRepository(private val context: Context) {
             .decodeSingle<BankDetails>()
     }
 
-    /* ------------------------------- Vehicle Details Methods ------------------------------- */
-
     suspend fun getVehicleDetails(): VehicleDetails? = withContext(Dispatchers.IO) {
         try {
+            if (!ensureAuthenticated()) {
+                throw Exception("Please login again")
+            }
+
             val partner = getDeliveryPartner() ?: return@withContext null
 
             App.supabase.from("vehicle_details")
@@ -309,7 +429,10 @@ class ProfileRepository(private val context: Context) {
                     filter { eq("delivery_partner_id", partner.id) }
                 }
                 .decodeSingleOrNull<VehicleDetails>()
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            if (e.message?.contains("login") == true) {
+                throw e
+            }
             null
         }
     }
@@ -322,6 +445,10 @@ class ProfileRepository(private val context: Context) {
         vehicleColor: String,
         registrationYear: Int
     ): VehicleDetails = withContext(Dispatchers.IO) {
+        if (!ensureAuthenticated()) {
+            throw Exception("Please login again")
+        }
+
         val partner = getDeliveryPartner()
             ?: throw IllegalStateException("Delivery partner profile not found")
 
@@ -349,6 +476,10 @@ class ProfileRepository(private val context: Context) {
         vehicleColor: String,
         registrationYear: Int
     ): VehicleDetails = withContext(Dispatchers.IO) {
+        if (!ensureAuthenticated()) {
+            throw Exception("Please login again")
+        }
+
         val body = buildJsonObject {
             put("vehicle_type", JsonPrimitive(vehicleType))
             put("vehicle_make", JsonPrimitive(vehicleMake))
@@ -366,46 +497,57 @@ class ProfileRepository(private val context: Context) {
             .decodeSingle<VehicleDetails>()
     }
 
-    /* ------------------------------- Profile Completion ------------------------------- */
+    // NEW METHODS FOR VERIFICATION STATUS
 
-    suspend fun calculateProfileCompletion(): Int = withContext(Dispatchers.IO) {
-        val partner = getDeliveryPartner() ?: return@withContext 0
-
-        var completion = 0
-
-        // Basic Profile (25%) - reduced to make room for profile image
-        if (partner.first_name.isNotEmpty() && partner.last_name.isNotEmpty() &&
-            partner.address_line1.isNotEmpty() && partner.city.isNotEmpty()
-        ) {
-            completion += 25
+    /**
+     * Check if all required documents are verified and update verification status
+     */
+    suspend fun updateVerificationStatus(): String = withContext(Dispatchers.IO) {
+        if (!ensureAuthenticated()) {
+            throw Exception("Please login again")
         }
 
-        // Profile Image (5%)
-        if (!partner.profile_photo_url.isNullOrEmpty()) {
-            completion += 5
-        }
+        val partner = getDeliveryPartner()
+            ?: throw IllegalStateException("Delivery partner profile not found")
 
-        // Bank Details (25%)
-        val bankDetails = getBankDetails()
-        if (bankDetails != null) {
-            completion += 25
-        }
-
-        // Vehicle Details (25%)
-        val vehicleDetails = getVehicleDetails()
-        if (vehicleDetails != null) {
-            completion += 25
-        }
-
-        // Documents (20%)
         val documents = getVerificationDocuments()
-        val requiredDocs = listOf("aadhar", "pan", "driving_license")
-        val completedDocs = documents.count { it.document_type in requiredDocs }
-        completion += (completedDocs * 20) / requiredDocs.size
+        val requiredDocTypes = listOf("aadhar", "pan", "driving_license")
 
-        // Update the completion percentage in database
+        // Check if all required documents are uploaded
+        val uploadedDocTypes = documents.map { it.document_type }
+        val allRequiredDocsUploaded = requiredDocTypes.all { it in uploadedDocTypes }
+
+        // Check if all documents are verified
+        val allDocsVerified = documents.filter { it.document_type in requiredDocTypes }
+            .all { it.verification_status == "verified" }
+
+        // Check profile completion
+        val profileComplete = partner.first_name.isNotEmpty() &&
+                partner.last_name.isNotEmpty() &&
+                partner.address_line1.isNotEmpty() &&
+                partner.city.isNotEmpty()
+
+        val bankDetails = getBankDetails()
+        val vehicleDetails = getVehicleDetails()
+
+        val newStatus = when {
+            // All conditions met for verification
+            profileComplete && bankDetails != null && vehicleDetails != null &&
+                    allRequiredDocsUploaded && allDocsVerified -> "verified"
+
+            // Documents uploaded but not all verified, or profile incomplete
+            allRequiredDocsUploaded && profileComplete && bankDetails != null && vehicleDetails != null -> "in_progress"
+
+            // Some progress made
+            profileComplete || bankDetails != null || vehicleDetails != null || documents.isNotEmpty() -> "in_progress"
+
+            // Default pending status
+            else -> "pending"
+        }
+
+        // Update verification status in database
         val body = buildJsonObject {
-            put("profile_completion_percentage", JsonPrimitive(completion))
+            put("verification_status", JsonPrimitive(newStatus))
         }
 
         App.supabase.from("delivery_partners")
@@ -413,15 +555,163 @@ class ProfileRepository(private val context: Context) {
                 filter { eq("id", partner.id) }
             }
 
+        newStatus
+    }
+
+    /**
+     * Manual verification method (for admin use or testing)
+     */
+    suspend fun manuallyVerifyPartner(): DeliveryPartner = withContext(Dispatchers.IO) {
+        if (!ensureAuthenticated()) {
+            throw Exception("Please login again")
+        }
+
+        val partner = getDeliveryPartner()
+            ?: throw IllegalStateException("Delivery partner profile not found")
+
+        val body = buildJsonObject {
+            put("verification_status", JsonPrimitive("verified"))
+        }
+
+        App.supabase.from("delivery_partners")
+            .update(body) {
+                filter { eq("id", partner.id) }
+                select()
+            }
+            .decodeSingle<DeliveryPartner>()
+    }
+
+    /**
+     * Check individual document verification status
+     */
+    suspend fun checkDocumentVerificationStatus(documentId: String): String = withContext(Dispatchers.IO) {
+        if (!ensureAuthenticated()) {
+            throw Exception("Please login again")
+        }
+
+        val document = App.supabase.from("verification_documents")
+            .select {
+                filter { eq("id", documentId) }
+            }
+            .decodeSingleOrNull<VerificationDocument>()
+
+        document?.verification_status ?: "pending"
+    }
+
+    /**
+     * Updated calculateProfileCompletion that also updates verification status
+     */
+    suspend fun calculateProfileCompletionAndVerification(): Pair<Int, String> = withContext(Dispatchers.IO) {
+        try {
+            if (!ensureAuthenticated()) {
+                throw Exception("Please login again")
+            }
+
+            val partner = getDeliveryPartner() ?: return@withContext Pair(0, "pending")
+
+            var completion = 0
+
+            // Basic Profile (25%)
+            val basicComplete = partner.first_name.isNotEmpty() &&
+                    partner.last_name.isNotEmpty() &&
+                    partner.address_line1.isNotEmpty() &&
+                    partner.city.isNotEmpty()
+            if (basicComplete) completion += 25
+
+            // Profile Image (5%)
+            if (!partner.profile_photo_url.isNullOrEmpty()) {
+                completion += 5
+            }
+
+            // Bank Details (25%)
+            val bankDetails = getBankDetails()
+            if (bankDetails != null) completion += 25
+
+            // Vehicle Details (25%)
+            val vehicleDetails = getVehicleDetails()
+            if (vehicleDetails != null) completion += 25
+
+            // Documents (20%)
+            val documents = getVerificationDocuments()
+            val requiredDocs = listOf("aadhar", "pan", "driving_license")
+            val completedDocs = documents.count { it.document_type in requiredDocs }
+            completion += (completedDocs * 20) / requiredDocs.size
+
+            // Determine verification status
+            val allDocsVerified = documents.filter { it.document_type in requiredDocs }
+                .all { it.verification_status == "verified" }
+
+            val verificationStatus = when {
+                completion == 100 && allDocsVerified -> "verified"
+                completion >= 80 -> "in_progress"
+                completion > 0 -> "in_progress"
+                else -> "pending"
+            }
+
+            // Update both completion and verification status
+            val body = buildJsonObject {
+                put("profile_completion_percentage", JsonPrimitive(completion))
+                put("verification_status", JsonPrimitive(verificationStatus))
+            }
+
+            App.supabase.from("delivery_partners")
+                .update(body) {
+                    filter { eq("id", partner.id) }
+                }
+
+            Pair(completion, verificationStatus)
+        } catch (e: Exception) {
+            if (e.message?.contains("login") == true) {
+                throw e
+            }
+            Pair(0, "pending")
+        }
+    }
+
+    /**
+     * Legacy method - use calculateProfileCompletionAndVerification instead
+     */
+    suspend fun calculateProfileCompletion(): Int = withContext(Dispatchers.IO) {
+        val (completion, _) = calculateProfileCompletionAndVerification()
         completion
     }
 
-    /* ------------------------------- Helpers ------------------------------- */
+    /**
+     * Verify all documents for a partner (for admin/testing)
+     */
+    suspend fun verifyAllDocuments(): Boolean = withContext(Dispatchers.IO) {
+        try {
+            if (!ensureAuthenticated()) {
+                throw Exception("Please login again")
+            }
+
+            val partner = getDeliveryPartner() ?: return@withContext false
+
+            val body = buildJsonObject {
+                put("verification_status", JsonPrimitive("verified"))
+            }
+
+            App.supabase.from("verification_documents")
+                .update(body) {
+                    filter { eq("delivery_partner_id", partner.id) }
+                }
+
+            // Also update partner status
+            updateVerificationStatus()
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
 
     private fun readBytesFromUri(uri: Uri): ByteArray {
-        val resolver = context.contentResolver
-        val input: InputStream = resolver.openInputStream(uri)
-            ?: throw IllegalStateException("Unable to open image")
-        return input.use { it.readBytes() }
+        return try {
+            val resolver = context.contentResolver
+            val input: InputStream = resolver.openInputStream(uri)
+                ?: throw IllegalStateException("Unable to open image from URI")
+            input.use { it.readBytes() }
+        } catch (e: Exception) {
+            throw Exception("Failed to read image file: ${e.message}")
+        }
     }
 }
