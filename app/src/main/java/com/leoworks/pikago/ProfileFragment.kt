@@ -7,15 +7,19 @@ import android.os.Bundle
 import android.provider.MediaStore
 import android.view.View
 import android.widget.EditText
+import android.widget.ImageView
 import android.widget.Switch
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.bumptech.glide.Glide
+import com.bumptech.glide.load.engine.DiskCacheStrategy
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.progressindicator.LinearProgressIndicator
@@ -29,9 +33,13 @@ import io.github.jan.supabase.postgrest.from
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.*
 
 class ProfileFragment : Fragment(R.layout.fragment_profile) {
 
+    private lateinit var ivProfileImage: ImageView
     private lateinit var tvName: TextView
     private lateinit var tvPhone: TextView
     private lateinit var tvVerificationStatus: TextView
@@ -50,7 +58,33 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
 
     private var currentDeliveryPartner: DeliveryPartner? = null
     private var selectedDocumentType: String? = null
+    private var currentPhotoPath: String = ""
 
+    // Profile image launcher for gallery
+    private val profileImagePickerLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            result.data?.data?.let { uri ->
+                uploadProfileImage(uri)
+            }
+        }
+    }
+
+    // Profile image launcher for camera
+    private val profileCameraLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val photoFile = File(currentPhotoPath)
+            if (photoFile.exists()) {
+                val photoUri = Uri.fromFile(photoFile)
+                uploadProfileImage(photoUri)
+            }
+        }
+    }
+
+    // Document image picker launcher
     private val imagePickerLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -92,6 +126,7 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
     }
 
     private fun initializeViews(view: View) {
+        ivProfileImage = view.findViewById(R.id.ivProfilePhoto) // Use your existing ID
         tvName = view.findViewById(R.id.tvName)
         tvPhone = view.findViewById(R.id.tvPhone)
         tvVerificationStatus = view.findViewById(R.id.tvVerificationStatus)
@@ -221,6 +256,9 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
             val authUser = App.supabase.auth.currentUserOrNull()
             tvPhone.text = authUser?.phone ?: authUser?.email ?: "Not available"
 
+            // Load profile image
+            loadProfileImage(partner.profile_photo_url)
+
             when (partner.verification_status) {
                 "pending" -> {
                     tvVerificationStatus.text = "Verification Pending"
@@ -257,6 +295,24 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
 
             cardProfileCompletion.visibility = if (progress < 100) View.VISIBLE else View.GONE
             switchAvailable.isChecked = partner.is_available
+        }
+    }
+
+    private fun loadProfileImage(imageUrl: String?) {
+        if (!imageUrl.isNullOrEmpty()) {
+            Glide.with(this)
+                .load(imageUrl)
+                .diskCacheStrategy(DiskCacheStrategy.ALL)
+                .placeholder(R.drawable.ic_profile_placeholder) // Use your existing drawable
+                .error(R.drawable.ic_profile_placeholder)
+                .circleCrop()
+                .into(ivProfileImage)
+        } else {
+            // Set default avatar
+            Glide.with(this)
+                .load(R.drawable.ic_profile_placeholder)
+                .circleCrop()
+                .into(ivProfileImage)
         }
     }
 
@@ -343,6 +399,11 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
     }
 
     private fun setupClickListeners(view: View) {
+        // Profile image click listener
+        ivProfileImage.setOnClickListener {
+            showImageUploadOptions()
+        }
+
         switchAvailable.setOnCheckedChangeListener { _, isChecked ->
             lifecycleScope.launch {
                 try {
@@ -364,6 +425,92 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
         }
 
         btnLogout.setOnClickListener { showLogoutDialog() }
+    }
+
+    private fun showImageUploadOptions() {
+        val options = arrayOf("Take Photo", "Choose from Gallery", "View Full Image")
+
+        AlertDialog.Builder(requireContext())
+            .setTitle("Profile Picture")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> takePicture()
+                    1 -> pickImageFromGallery()
+                    2 -> showFullImage()
+                }
+            }
+            .show()
+    }
+
+    private fun takePicture() {
+        try {
+            val photoFile = createImageFile()
+            currentPhotoPath = photoFile.absolutePath
+
+            val photoUri = FileProvider.getUriForFile(
+                requireContext(),
+                "${requireContext().packageName}.fileprovider",
+                photoFile
+            )
+
+            val intent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
+            intent.putExtra(MediaStore.EXTRA_OUTPUT, photoUri)
+            profileCameraLauncher.launch(intent)
+        } catch (e: Exception) {
+            showError("Failed to open camera: ${e.message}")
+        }
+    }
+
+    private fun pickImageFromGallery() {
+        val intent = Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
+        intent.type = "image/*"
+        profileImagePickerLauncher.launch(intent)
+    }
+
+    private fun showFullImage() {
+        currentDeliveryPartner?.profile_photo_url?.let { imageUrl ->
+            if (imageUrl.isNotEmpty()) {
+                val intent = Intent(requireContext(), FullImageViewActivity::class.java)
+                intent.putExtra("image_url", imageUrl)
+                intent.putExtra("title", "Profile Picture")
+                startActivity(intent)
+            } else {
+                showError("No profile picture available")
+            }
+        } ?: showError("No profile picture available")
+    }
+
+    private fun createImageFile(): File {
+        val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+        val imageFileName = "PROFILE_$timeStamp"
+        val storageDir = requireContext().getExternalFilesDir("Pictures")
+        return File.createTempFile(imageFileName, ".jpg", storageDir)
+    }
+
+    private fun uploadProfileImage(imageUri: Uri) {
+        lifecycleScope.launch {
+            try {
+                showLoading(true, "Uploading profile picture...")
+
+                val imageUrl = profileRepository.uploadProfileImage(imageUri)
+
+                // Update the delivery partner with new image URL
+                profileRepository.updateProfileImage(imageUrl)
+
+                // Refresh current partner data
+                currentDeliveryPartner = profileRepository.getDeliveryPartner()
+
+                // Update UI
+                loadProfileImage(imageUrl)
+
+                showSuccess("Profile picture updated successfully!")
+
+            } catch (e: Exception) {
+                showError("Failed to upload profile picture: ${e.message}")
+            } finally {
+                showLoading(false)
+            }
+        }
     }
 
     private fun handleProfileSectionClick(section: ProfileSection) {
@@ -514,6 +661,7 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
     private fun showLoading(show: Boolean, message: String = "Loading...") {
         btnCompleteProfile.isEnabled = !show
         btnLogout.isEnabled = !show
+        ivProfileImage.isClickable = !show
     }
 
     private fun showError(message: String) {

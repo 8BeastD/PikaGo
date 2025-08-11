@@ -58,12 +58,13 @@ dependencies {
     implementation("io.github.jan-tennert.supabase:storage-kt:3.1.1")
     implementation("io.github.jan-tennert.supabase:realtime-kt:3.1.1")
     implementation("io.ktor:ktor-client-okhttp:3.0.3")
-    implementation ("de.hdodenhof:circleimageview:3.1.0")
-    // ✅ Glide for image loading
+
+    // ✅ Image handling
+    implementation("de.hdodenhof:circleimageview:3.1.0")
     implementation("com.github.bumptech.glide:glide:4.15.1")
     kapt("com.github.bumptech.glide:compiler:4.15.1")
-    implementation("io.ktor:ktor-serialization-kotlinx-json:3.0.3")
-    implementation("io.github.jan-tennert.supabase:postgrest-kt:3.1.1")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
 
+    // ✅ Serialization
+    implementation("io.ktor:ktor-serialization-kotlinx-json:3.0.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
 }

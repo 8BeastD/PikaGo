@@ -136,6 +136,64 @@ class ProfileRepository(private val context: Context) {
             }
     }
 
+    /* ------------------------------- Profile Image Methods ------------------------------- */
+
+    /**
+     * Uploads profile image to Supabase storage
+     */
+    suspend fun uploadProfileImage(imageUri: Uri): String = withContext(Dispatchers.IO) {
+        try {
+            val authUser = App.supabase.auth.currentUserOrNull()
+                ?: throw IllegalStateException("User not logged in")
+
+            // Generate unique filename
+            val fileName = "profile_${authUser.id}_${System.currentTimeMillis()}.jpg"
+            val bucketName = "profile-images" // Make sure this bucket exists in Supabase
+
+            // Read image data using existing helper method
+            val imageBytes = readBytesFromUri(imageUri)
+
+            // Upload to Supabase Storage
+            App.supabase.storage[bucketName].upload(fileName, imageBytes) {
+                upsert = true
+            }
+
+            // Get public URL
+            val publicUrl = App.supabase.storage[bucketName].publicUrl(fileName)
+
+            return@withContext publicUrl
+
+        } catch (e: Exception) {
+            throw Exception("Failed to upload profile image: ${e.message}")
+        }
+    }
+
+    /**
+     * Updates the profile image URL in delivery_partners table
+     */
+    suspend fun updateProfileImage(imageUrl: String) = withContext(Dispatchers.IO) {
+        try {
+            val authUser = App.supabase.auth.currentUserOrNull()
+                ?: throw IllegalStateException("User not logged in")
+
+            val body = buildJsonObject {
+                put("profile_photo_url", JsonPrimitive(imageUrl)) // Use your existing field name
+            }
+
+            App.supabase.from("delivery_partners")
+                .update(body) {
+                    filter {
+                        eq("user_id", authUser.id)
+                    }
+                }
+
+        } catch (e: Exception) {
+            throw Exception("Failed to update profile image: ${e.message}")
+        }
+    }
+
+    /* ------------------------------- Document Methods ------------------------------- */
+
     suspend fun getVerificationDocuments(): List<VerificationDocument> = withContext(Dispatchers.IO) {
         try {
             val partner = getDeliveryPartner() ?: return@withContext emptyList()
@@ -175,6 +233,8 @@ class ProfileRepository(private val context: Context) {
             .insert(body) { select() }
             .decodeSingle<VerificationDocument>()
     }
+
+    /* ------------------------------- Bank Details Methods ------------------------------- */
 
     suspend fun getBankDetails(): BankDetails? = withContext(Dispatchers.IO) {
         try {
@@ -237,6 +297,8 @@ class ProfileRepository(private val context: Context) {
             }
             .decodeSingle<BankDetails>()
     }
+
+    /* ------------------------------- Vehicle Details Methods ------------------------------- */
 
     suspend fun getVehicleDetails(): VehicleDetails? = withContext(Dispatchers.IO) {
         try {
@@ -304,16 +366,23 @@ class ProfileRepository(private val context: Context) {
             .decodeSingle<VehicleDetails>()
     }
 
+    /* ------------------------------- Profile Completion ------------------------------- */
+
     suspend fun calculateProfileCompletion(): Int = withContext(Dispatchers.IO) {
         val partner = getDeliveryPartner() ?: return@withContext 0
 
         var completion = 0
 
-        // Basic Profile (30%)
+        // Basic Profile (25%) - reduced to make room for profile image
         if (partner.first_name.isNotEmpty() && partner.last_name.isNotEmpty() &&
             partner.address_line1.isNotEmpty() && partner.city.isNotEmpty()
         ) {
-            completion += 30
+            completion += 25
+        }
+
+        // Profile Image (5%)
+        if (!partner.profile_photo_url.isNullOrEmpty()) {
+            completion += 5
         }
 
         // Bank Details (25%)

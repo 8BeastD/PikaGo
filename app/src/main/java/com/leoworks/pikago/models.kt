@@ -20,7 +20,7 @@ data class DeliveryPartner(
     val last_name: String,
     val date_of_birth: String?,
     val gender: String?,
-    val profile_photo_url: String?,
+    val profile_photo_url: String?, // This is your existing field name
     val address_line1: String,
     val address_line2: String?,
     val city: String,
