@@ -7,4 +7,6 @@
     <string name="edit_profile">Edit Profile</string>
     <string name="verify_now">Verify Now</string>
     <string name="upload">Upload</string>
+    <string name="google_maps_key">AIzaSyDNNBEcTzdgnS3kwCG1xbctiU0kGkvkVK8</string>
+
 </resources>
