@@ -18,11 +18,10 @@ import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import kotlin.math.max
-
-// NEW: JSON helpers + Android Log
 import org.json.JSONObject
 import org.json.JSONArray
 import android.util.Log
+import kotlinx.serialization.json.JsonObject
 
 class AssignedOrderAdapter(
     private var items: List<AssignedOrder> = emptyList(),
@@ -77,15 +76,13 @@ class AssignedOrderAdapter(
 
             btnProceed?.setOnClickListener {
                 val activity = itemView.context as? FragmentActivity ?: return@setOnClickListener
-
-                // UPDATED: Use address_details field from the model (contains full JSON with coordinates)
                 val addressJson = normalizedAddressJson(order)
                 if (addressJson.isNullOrBlank()) {
                     Toast.makeText(itemView.context, "Address details not available.", Toast.LENGTH_SHORT).show()
                     return@setOnClickListener
                 }
 
-                // Optional: quick sanity check but don't block if coordinates are missing
+                // Optional: sanity check
                 try {
                     val obj = JSONObject(addressJson)
                     val hasLat = obj.has("latitude") || obj.has("lat")
@@ -95,7 +92,6 @@ class AssignedOrderAdapter(
                     }
                 } catch (e: Exception) {
                     Log.e("OrderAdapter", "Address JSON validation failed: ${e.message}")
-                    // Don't block, just log the issue
                 }
 
                 OrderDetailsSheet.show(
@@ -133,28 +129,37 @@ class AssignedOrderAdapter(
         }
 
         /**
-         * Get address_details field from the order and return as JSON string
+         * Prefer model field; handle String, Map, and kotlinx JsonObject.
          */
         private fun normalizedAddressJson(order: AssignedOrder): String? {
-            // Get the address_details field
-            val addressDetails = getAddressDetailsField(order) ?: return null
+            val addressDetails: Any? = order.address_details
+                ?: getAddressDetailsField(order) // legacy fallback via reflection
 
-            // If it's already a JSON string, validate and clean it
+            // 1) If kotlinx JsonObject (from Supabase jsonb)
+            if (addressDetails is JsonObject) {
+                return try {
+                    val obj = JSONObject(addressDetails.toString())
+                    normalizeLatLng(obj).toString()
+                } catch (e: Exception) {
+                    Log.e("OrderAdapter", "Failed to convert JsonObject: ${e.message}")
+                    null
+                }
+            }
+
+            // 2) If raw JSON String
             if (addressDetails is String && addressDetails.isNotBlank()) {
                 return try {
-                    // Clean the JSON string first
                     val cleanJson = cleanJsonString(addressDetails)
                     val obj = JSONObject(cleanJson)
                     normalizeLatLng(obj).toString()
                 } catch (e: Exception) {
                     Log.e("OrderAdapter", "Failed to parse address JSON: ${e.message}")
                     Log.e("OrderAdapter", "Raw address data: $addressDetails")
-                    // Create a fallback basic JSON
                     createFallbackAddressJson(addressDetails)
                 }
             }
 
-            // If it's a Map from Supabase, convert to JSON
+            // 3) If Map from Supabase
             if (addressDetails is Map<*, *>) {
                 return try {
                     val obj = mapToJsonObject(addressDetails)
@@ -168,30 +173,20 @@ class AssignedOrderAdapter(
             return null
         }
 
-        /**
-         * Clean common JSON formatting issues
-         */
         private fun cleanJsonString(jsonStr: String): String {
             return jsonStr.trim()
                 .replace("\n", "")
                 .replace("\r", "")
                 .replace("\t", "")
-                .replace("\\\"", "\"") // Fix escaped quotes
-                .let { cleaned ->
-                    // Ensure it starts and ends with braces
-                    if (!cleaned.startsWith("{")) "{$cleaned" else cleaned
-                }.let { cleaned ->
-                    if (!cleaned.endsWith("}")) "$cleaned}" else cleaned
-                }
+                .replace("\\\"", "\"")
+                .let { cleaned -> if (!cleaned.startsWith("{")) "{$cleaned" else cleaned }
+                .let { cleaned -> if (!cleaned.endsWith("}")) "$cleaned}" else cleaned }
         }
 
-        /**
-         * Create a basic fallback JSON when parsing fails
-         */
         private fun createFallbackAddressJson(rawAddress: String): String {
             return try {
                 JSONObject().apply {
-                    put("address_line_1", rawAddress.take(100)) // Limit length
+                    put("address_line_1", rawAddress.take(100))
                     put("recipient_name", "")
                     put("phone_number", "")
                     put("city", "")
@@ -203,13 +198,12 @@ class AssignedOrderAdapter(
                     put("lng", 0.0)
                 }.toString()
             } catch (e: Exception) {
-                // Ultimate fallback
                 """{"address_line_1":"Address not available","latitude":0.0,"longitude":0.0,"lat":0.0,"lng":0.0}"""
             }
         }
 
         /**
-         * Use reflection to get address_details field since it might not be in the model yet
+         * Legacy reflection (kept for safety in case the model isn’t updated in some build flavor)
          */
         private fun getAddressDetailsField(order: AssignedOrder): Any? {
             return try {
@@ -217,18 +211,16 @@ class AssignedOrderAdapter(
                 field.isAccessible = true
                 field.get(order)
             } catch (e: Exception) {
-                // If address_details field doesn't exist, try other common field names
                 try {
                     val field = order.javaClass.getDeclaredField("addressDetails")
                     field.isAccessible = true
                     field.get(order)
-                } catch (e2: Exception) {
+                } catch (_: Exception) {
                     null
                 }
             }
         }
 
-        // Convert Map<*,*> into JSONObject (recursively handles nested maps/lists)
         private fun mapToJsonObject(map: Map<*, *>): JSONObject {
             val obj = JSONObject()
             for ((k, v) in map) {
@@ -256,12 +248,9 @@ class AssignedOrderAdapter(
             return arr
         }
 
-        // Ensure numeric doubles + provide both naming variants
         private fun normalizeLatLng(obj: JSONObject): JSONObject {
-            // Prefer existing numeric or string -> double
             val lat = extractDouble(obj, "latitude") ?: extractDouble(obj, "lat")
             val lng = extractDouble(obj, "longitude") ?: extractDouble(obj, "lng")
-
             if (lat != null) {
                 obj.put("latitude", lat)
                 obj.put("lat", lat)
@@ -276,15 +265,12 @@ class AssignedOrderAdapter(
         private fun extractDouble(obj: JSONObject, key: String): Double? {
             if (!obj.has(key)) return null
             return try {
-                val v = obj.get(key)
-                when (v) {
+                when (val v = obj.get(key)) {
                     is Number -> v.toDouble()
                     is String -> v.toDoubleOrNull()
                     else -> null
                 }
-            } catch (_: Exception) {
-                null
-            }
+            } catch (_: Exception) { null }
         }
     }
 }

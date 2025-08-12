@@ -1,6 +1,7 @@
 package com.leoworks.pikago.models
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonObject
 
 @Serializable
 data class AssignedOrder(
@@ -27,6 +28,9 @@ data class AssignedOrder(
 
     val delivery_type: String? = null,
     val delivery_address: String? = null,
+
+    // 🔥 NEW: jsonb column from Supabase
+    val address_details: JsonObject? = null,
 
     val status: String? = null,
     val created_at: String? = null,
