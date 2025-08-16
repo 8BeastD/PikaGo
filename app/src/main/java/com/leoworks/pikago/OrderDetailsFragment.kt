@@ -37,7 +37,7 @@ class OrderDetailsFragment : Fragment() {
     private var assigned: AssignedOrderRow? = null
     private var items: List<OrderItemRow> = emptyList()
 
-    // Address JSONs for nav/call
+    // Address JSONs for call button / display
     private var pickupAddress: JSONObject? = null
     private var deliveryAddress: JSONObject? = null
 
@@ -174,13 +174,13 @@ class OrderDetailsFragment : Fragment() {
         binding.txtPickupAddress.text = pickupAddress?.toPrettyAddress() ?: "Address not available"
         binding.txtDeliveryAddress.text = deliveryAddress?.toPrettyAddress() ?: "Address not available"
 
-        // ---- PICKUP contact/phone (NEW) ----
+        // PICKUP contact/phone
         val pName = pickupAddress?.optString("recipient_name").orEmpty().ifBlank { "N/A" }
         val pPhone = pickupAddress?.optString("phone_number").orEmpty().ifBlank { "N/A" }
         binding.txtPickupContactName.text = pName
         binding.txtPickupPhone.text = pPhone
 
-        // ---- DELIVERY contact/phone ----
+        // DELIVERY contact/phone
         val dName = deliveryAddress?.optString("recipient_name").orEmpty().ifBlank { "N/A" }
         val dPhone = deliveryAddress?.optString("phone_number").orEmpty().ifBlank { "N/A" }
         binding.txtCustomerName.text = dName
@@ -195,8 +195,8 @@ class OrderDetailsFragment : Fragment() {
                 // If DB gave a line total, use it; otherwise product+service:
                 price = (it.totalPrice ?: ((it.productPrice ?: 0.0) + (it.servicePrice ?: 0.0))),
                 quantity = it.quantity ?: 0,
-                imageUrl = it.productImage.orEmpty(),   // << uses product_image column
-                // extra fields (optional)
+                imageUrl = it.productImage.orEmpty(),
+                // optional passthroughs
                 id = it.id,
                 orderId = it.orderId,
                 productId = it.productId,
@@ -219,28 +219,16 @@ class OrderDetailsFragment : Fragment() {
     // ---------------- Actions ----------------
 
     private fun startNavigation() {
+        // Hand off to NavigationActivity; it decides pickup/drop based on order_status
         try {
-            val obj = deliveryAddress ?: pickupAddress
-            val lat = (obj?.optDouble("latitude") ?: 0.0).takeIf { it != 0.0 }
-                ?: obj?.optDouble("lat")?.takeIf { it != 0.0 }
-            val lng = (obj?.optDouble("longitude") ?: 0.0).takeIf { it != 0.0 }
-                ?: obj?.optDouble("lng")?.takeIf { it != 0.0 }
+            val intent = android.content.Intent(
+                requireContext(),
+                com.leoworks.pikago.ui.NavigationActivity::class.java
+            ).putExtra(com.leoworks.pikago.ui.NavigationActivity.EXTRA_ORDER_ID, orderId)
 
-            if (lat != null && lng != null) {
-                val uri = android.net.Uri.parse("google.navigation:q=$lat,$lng")
-                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, uri)
-                intent.setPackage("com.google.android.apps.maps")
-                if (intent.resolveActivity(requireContext().packageManager) != null) {
-                    startActivity(intent)
-                } else {
-                    val webUri = android.net.Uri.parse("https://www.google.com/maps/dir/?api=1&destination=$lat,$lng")
-                    startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, webUri))
-                }
-            } else {
-                Toast.makeText(requireContext(), "Location coordinates not available", Toast.LENGTH_SHORT).show()
-            }
+            startActivity(intent)
         } catch (e: Exception) {
-            Log.e("OrderDetailsFragment", "Navigation error: ${e.message}")
+            Log.e("OrderDetailsFragment", "Failed to start nav: ${e.message}")
             Toast.makeText(requireContext(), "Failed to open navigation", Toast.LENGTH_SHORT).show()
         }
     }
