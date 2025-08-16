@@ -61,4 +61,33 @@
     <color name="slot_background">#F8F9FA</color>
     <color name="countdown_background">#FFF3E0</color>
 
+
+
+
+
+
+
+
+
+
+
+    <color name="primary_dark">#0D47A1</color>
+
+    <!-- Secondary Colors -->
+    <color name="secondary_color">#FF9800</color>
+    <color name="secondary_dark">#F57C00</color>
+    <color name="secondary_light">#FFE0B2</color>
+
+    <color name="info_color">#2196F3</color>
+
+    <!-- Text Colors -->
+    <color name="text_hint">#BDBDBD</color>
+
+    <!-- Background Colors -->
+    <color name="background_color">#FAFAFA</color>
+    <color name="surface_color">#FFFFFF</color>
+    <color name="divider_color">#E0E0E0</color>
+
+    <!-- Standard Colors -->
+    <color name="transparent">#00000000</color>
 </resources>
