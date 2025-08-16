@@ -10,6 +10,7 @@ import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.core.content.ContextCompat
 import androidx.core.os.bundleOf
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
@@ -20,9 +21,7 @@ import com.leoworks.pikago.databinding.SheetOrderDetailsBinding
 import io.github.jan.supabase.postgrest.from
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.text.NumberFormat
 import java.util.Locale
@@ -35,39 +34,58 @@ class OrderDetailsSheet : BottomSheetDialogFragment() {
     private val supabase by lazy { App.supabase }
 
     private val orderId: String by lazy { requireArguments().getString(ARG_ORDER_ID)!! }
-    private val addressRaw: String? by lazy { requireArguments().getString(ARG_ADDRESS_JSON) }
 
     // destination cache
     private var destLat: Double? = null
     private var destLng: Double? = null
+    private var orderStatus: String? = null
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         _binding = SheetOrderDetailsBinding.inflate(inflater, container, false)
         return binding.root
     }
 
-    override fun getTheme(): Int = com.google.android.material.R.style.ThemeOverlay_Material3_BottomSheetDialog
+    // NOTE: Removed getTheme() override to avoid unresolved R style issues.
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         binding.btnClose.setOnClickListener { dismiss() }
         binding.tvOrderCode.text = orderId
 
-        bindAddress(addressRaw)
         setupSwipeToNavigate()
-        fetchTotals()
+        fetchOrderDetails()
     }
 
-    private fun fetchTotals() {
+    private fun fetchOrderDetails() {
         setLoading(true)
         viewLifecycleOwner.lifecycleScope.launch {
             try {
-                val rows = supabase.from("order_items")
+                // First get order details with address info
+                val orderRows = supabase.from("assigned_orders").select {
+                    filter { eq("id", orderId) }
+                    limit(1)
+                }.decodeList<AssignedOrderRow>()
+
+                val orderRow = orderRows.firstOrNull()
+                if (orderRow == null) {
+                    Toast.makeText(requireContext(), "Order not found", Toast.LENGTH_LONG).show()
+                    dismiss()
+                    return@launch
+                }
+
+                orderStatus = orderRow.order_status
+
+                // Determine which address to show based on order status
+                val addressToShow = determineAddressToShow(orderRow)
+                bindAddress(addressToShow)
+
+                // Then get order items
+                val itemRows = supabase.from("order_items")
                     .select { filter { eq("order_id", orderId) } }
                     .decodeList<OrderItemRow>()
 
-                val totalItems = rows.sumOf { (it.quantity ?: 0) }
-                val totalAmount = rows.sumOf { (it.total_price ?: 0.0) }
+                val totalItems = itemRows.sumOf { (it.quantity ?: 0) }
+                val totalAmount = itemRows.sumOf { (it.total_price ?: 0.0) }
                 val currency = NumberFormat.getCurrencyInstance(Locale("en", "IN"))
 
                 binding.tvTotalItems.text = totalItems.toString()
@@ -75,7 +93,7 @@ class OrderDetailsSheet : BottomSheetDialogFragment() {
 
                 // Build clean vertical rows
                 binding.itemsList.removeAllViews()
-                rows.forEach { row ->
+                itemRows.forEach { row ->
                     addItemRow(
                         name = row.product_name ?: "Item",
                         qty = row.quantity ?: 0,
@@ -93,6 +111,23 @@ class OrderDetailsSheet : BottomSheetDialogFragment() {
         }
     }
 
+    private suspend fun determineAddressToShow(orderRow: AssignedOrderRow): JsonObject? {
+        val status = orderRow.order_status?.lowercase().orEmpty()
+
+        // Logic:
+        // For pickup statuses -> show pickup address (address_details)
+        // For delivery statuses -> show delivery address (drop_address)
+        val pickupStatuses = setOf("accepted", "assigned", "ready_for_pickup", "processing", "confirmed")
+        val deliveryStatuses = setOf("picked_up", "out_for_delivery", "ready_for_delivery", "shipped", "in_transit", "delivered")
+
+        return when {
+            status in pickupStatuses -> orderRow.address_details
+            status in deliveryStatuses -> orderRow.drop_address
+            // Default fallback
+            else -> orderRow.address_details ?: orderRow.drop_address
+        }
+    }
+
     private fun addItemRow(name: String, qty: Int, price: String) {
         val ctx = requireContext()
         val row = LinearLayout(ctx).apply {
@@ -107,13 +142,13 @@ class OrderDetailsSheet : BottomSheetDialogFragment() {
 
         val left = TextView(ctx).apply {
             text = "$name  •  x$qty"
-            setTextColor(resources.getColor(android.R.color.secondary_text_light, null))
+            setTextColor(ContextCompat.getColor(ctx, android.R.color.secondary_text_light))
             textSize = 14f
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
         val right = TextView(ctx).apply {
             text = price
-            setTextColor(resources.getColor(android.R.color.white, null))
+            setTextColor(ContextCompat.getColor(ctx, android.R.color.white))
             textSize = 15f
             setTypeface(typeface, android.graphics.Typeface.BOLD)
         }
@@ -123,53 +158,28 @@ class OrderDetailsSheet : BottomSheetDialogFragment() {
         binding.itemsList.addView(row)
     }
 
-    private fun bindAddress(raw: String?) {
-        // 1) Try strict JSON
-        val jsonObj: JsonObject? = runCatching { raw?.let { Json.parseToJsonElement(it).jsonObject } }.getOrNull()
-
-        if (jsonObj != null) {
-            fillAddressFromJson(jsonObj)
+    private fun bindAddress(addressJson: JsonObject?) {
+        if (addressJson == null) {
+            binding.tvRecipient.text = "—"
+            binding.tvPhone.text = "—"
+            binding.tvAddress.text = "No address available"
             return
         }
 
-        // 2) Fallback: parse "key=value, key=value" style or anything similar
-        val lat = extractDoubleFallback(raw, "latitude", "lat")
-        val lng = extractDoubleFallback(raw, "longitude", "lng", "lon")
-        val recipient = extractStringFallback(raw, "recipient_name")
-        val phone = extractStringFallback(raw, "phone_number")
-        val line1 = extractStringFallback(raw, "address_line_1")
-        val line2 = extractStringFallback(raw, "address_line_2")
-        val city = extractStringFallback(raw, "city")
-        val state = extractStringFallback(raw, "state")
-        val pincode = extractStringFallback(raw, "pincode")
-
-        destLat = lat
-        destLng = lng
-
-        binding.tvRecipient.text = recipient ?: "-"
-        binding.tvPhone.text = phone ?: "-"
-
-        val addressLines = listOf(
-            line1 ?: "",
-            line2 ?: "",
-            listOfNotNull(city, state).filter { it.isNotBlank() }.joinToString(", ")
-        ).filter { it.isNotBlank() }
-
-        binding.tvAddress.text = buildString {
-            append(addressLines.joinToString("\n"))
-            if (!pincode.isNullOrBlank()) append("\n$pincode")
-        }
+        fillAddressFromJson(addressJson)
     }
 
     private fun fillAddressFromJson(obj: JsonObject) {
         fun jStr(key: String): String? =
-            runCatching { obj[key]?.jsonPrimitive?.content }.getOrNull()?.takeIf { it.lowercase(Locale.ROOT) != "null" }
+            runCatching { obj[key]?.jsonPrimitive?.content }
+                .getOrNull()
+                ?.takeIf { it.lowercase(Locale.ROOT) != "null" }
 
         fun jDbl(key: String): Double? =
             runCatching { obj[key]?.jsonPrimitive?.content?.toDouble() }.getOrNull()
 
-        val recipient = jStr("recipient_name") ?: "-"
-        val phone = jStr("phone_number") ?: "-"
+        val recipient = jStr("recipient_name") ?: "—"
+        val phone = jStr("phone_number") ?: "—"
         val line1 = jStr("address_line_1") ?: ""
         val line2 = jStr("address_line_2") ?: ""
         val city = jStr("city") ?: ""
@@ -227,6 +237,7 @@ class OrderDetailsSheet : BottomSheetDialogFragment() {
             putExtra(NavigationActivity.EXTRA_DEST_LNG, lng)
         }
         startActivity(intent)
+        dismiss()
     }
 
     private fun setLoading(loading: Boolean) {
@@ -240,19 +251,15 @@ class OrderDetailsSheet : BottomSheetDialogFragment() {
 
     companion object {
         private const val ARG_ORDER_ID = "order_id"
-        private const val ARG_ADDRESS_JSON = "address_json"
 
-        fun newInstance(orderId: String, addressJson: String?): OrderDetailsSheet {
+        fun newInstance(orderId: String): OrderDetailsSheet {
             return OrderDetailsSheet().apply {
-                arguments = bundleOf(
-                    ARG_ORDER_ID to orderId,
-                    ARG_ADDRESS_JSON to addressJson
-                )
+                arguments = bundleOf(ARG_ORDER_ID to orderId)
             }
         }
 
-        fun show(activity: FragmentActivity, orderId: String, addressJson: String?) {
-            newInstance(orderId, addressJson).show(activity.supportFragmentManager, "order_details_sheet")
+        fun show(activity: FragmentActivity, orderId: String) {
+            newInstance(orderId).show(activity.supportFragmentManager, "order_details_sheet")
         }
     }
 }
@@ -264,38 +271,10 @@ data class OrderItemRow(
     val total_price: Double? = null
 )
 
-// ----------------------
-// Fallback parsers
-// ----------------------
-
-private val NUMBER_RE = """[-+]?\d+(?:\.\d+)?"""
-private fun extractDoubleFallback(src: String?, vararg keys: String): Double? {
-    if (src.isNullOrBlank()) return null
-    keys.forEach { key ->
-        // match: key : 12.34  OR  key=12.34  (case-insensitive)
-        val rx = Regex("""(?i)\b${Regex.escape(key)}\b\s*[:=]\s*($NUMBER_RE)""")
-        rx.find(src)?.let { m ->
-            return m.groupValues[1].toDoubleOrNull()
-        }
-        // also try quoted numbers "12.34"
-        val rxQ = Regex("""(?i)\b${Regex.escape(key)}\b\s*[:=]\s*"?($NUMBER_RE)"?""")
-        rxQ.find(src)?.let { m ->
-            return m.groupValues[1].toDoubleOrNull()
-        }
-    }
-    return null
-}
-
-private fun extractStringFallback(src: String?, vararg keys: String): String? {
-    if (src.isNullOrBlank()) return null
-    keys.forEach { key ->
-        // key : "value"
-        val rxQuoted = Regex("""(?i)\b${Regex.escape(key)}\b\s*[:=]\s*"([^"]+)"""")
-        rxQuoted.find(src)?.let { return it.groupValues[1].trim() }
-
-        // key : value (until comma/brace)
-        val rxBare = Regex("""(?i)\b${Regex.escape(key)}\b\s*[:=]\s*([^,}\n\r]+)""")
-        rxBare.find(src)?.let { return it.groupValues[1].trim() }
-    }
-    return null
-}
+@Serializable
+data class AssignedOrderRow(
+    val id: String,
+    val order_status: String? = null,
+    val address_details: JsonObject? = null, // pickup address
+    val drop_address: JsonObject? = null     // delivery address
+)

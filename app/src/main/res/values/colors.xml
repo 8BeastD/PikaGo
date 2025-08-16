@@ -145,4 +145,51 @@
 
     <!-- Standard Colors -->
     <color name="transparent">#00000000</color>
+
+
+
+
+
+
+
+        <!-- Premium Color Palette -->
+        <color name="premium_primary">#FF6B35</color>
+        <color name="premium_primary_dark">#E55A2B</color>
+        <color name="premium_secondary">#4ECDC4</color>
+        <color name="premium_secondary_dark">#45B7B8</color>
+        <color name="premium_accent">#F7D794</color>
+        <color name="premium_accent_dark">#F3C623</color>
+
+        <!-- Premium Status Colors -->
+        <color name="premium_success">#2ECC71</color>
+        <color name="premium_warning">#F39C12</color>
+        <color name="premium_error">#E74C3C</color>
+        <color name="premium_info">#3498DB</color>
+
+        <!-- Premium Surface Colors -->
+        <color name="premium_surface">#FFFFFF</color>
+        <color name="premium_surface_variant">#F8F9FA</color>
+        <color name="premium_background">#F5F6FA</color>
+        <color name="premium_background_dark">#2C3E50</color>
+
+        <!-- Premium Text Colors -->
+        <color name="premium_text_primary">#2C3E50</color>
+        <color name="premium_text_secondary">#7F8C8D</color>
+        <color name="premium_text_hint">#BDC3C7</color>
+        <color name="premium_text_white">#FFFFFF</color>
+
+        <!-- Premium Overlay Colors -->
+        <color name="premium_overlay_light">#80FFFFFF</color>
+        <color name="premium_overlay_dark">#80000000</color>
+        <color name="white_translucent">#80FFFFFF</color>
+        <color name="black_translucent">#80000000</color>
+
+        <!-- Status-specific Colors -->
+        <color name="pickup_color">#FF6B35</color>
+        <color name="delivery_color">#4ECDC4</color>
+        <color name="completed_color">#2ECC71</color>
+        <color name="pending_color">#F39C12</color>
+
+
+
 </resources>
