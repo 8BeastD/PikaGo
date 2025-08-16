@@ -62,6 +62,61 @@
     <color name="countdown_background">#FFF3E0</color>
 
 
+    <color name="primary_variant">#512DA8</color>
+
+    <color name="secondary_variant">#1976D2</color>
+
+    <!-- Background Colors -->
+
+    <color name="surface_variant">#E9ECEF</color>
+
+    <!-- Text Colors -->
+    <color name="on_surface_primary">#FFFFFF</color>
+    <color name="on_surface_secondary">#FFFFFF</color>
+
+
+    <!-- Status Colors -->
+    <color name="status_progress">#FF9800</color>
+    <color name="status_completed">#4CAF50</color>
+    <color name="status_pending">#F44336</color>
+
+    <!-- Payment Colors -->
+    <color name="payment_success">#4CAF50</color>
+    <color name="payment_pending">#FF9800</color>
+    <color name="payment_failed">#F44336</color>
+
+    <!-- Icon Colors -->
+    <color name="icon_accent">#673AB7</color>
+    <color name="payment_icon">#FFFFFF</color>
+    <color name="items_icon">#FFFFFF</color>
+    <color name="pickup_icon">#FFFFFF</color>
+    <color name="delivery_icon">#FFFFFF</color>
+    <color name="security_icon">#FFFFFF</color>
+
+    <!-- Amount and Phone Colors -->
+    <color name="amount_color">#4CAF50</color>
+    <color name="phone_number">#2196F3</color>
+
+    <!-- Security and Code Colors -->
+    <color name="security_code">#FF5722</color>
+    <color name="copy_button_bg">#FF9800</color>
+    <color name="copy_button_icon">#FFFFFF</color>
+
+    <!-- Button Colors -->
+    <color name="navigation_button">#673AB7</color>
+    <color name="navigation_ripple">#FFFFFF33</color>
+    <color name="call_button_text">#2196F3</color>
+    <color name="call_button_icon">#2196F3</color>
+    <color name="call_button_stroke">#2196F3</color>
+    <color name="call_button_ripple">#2196F333</color>
+    <color name="complete_button">#4CAF50</color>
+    <color name="complete_ripple">#FFFFFF33</color>
+
+    <!-- Divider Colors -->
+
+    <color name="divider_modern">#E0E0E0</color>
+
+
 
 
 
