@@ -3,87 +3,104 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/rootRide"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:background="#F8F9FA">
 
-    <com.google.android.material.appbar.MaterialToolbar
-        android:id="@+id/toolbarRide"
+    <!-- Premium Header with Gradient -->
+    <LinearLayout
+        android:id="@+id/premiumHeader"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:title="Assigned Orders"
-        app:titleCentered="true"
-        app:layout_scrollFlags="scroll|enterAlways" />
+        android:layout_height="120dp"
+        android:background="@drawable/premium_header_gradient"
+        android:orientation="vertical"
+        android:elevation="8dp"
+        app:layout_behavior="@string/appbar_scrolling_view_behavior">
 
+        <com.google.android.material.appbar.MaterialToolbar
+            android:id="@+id/toolbarRide"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:background="@android:color/transparent"
+            android:title="Assigned Orders"
+            app:titleTextColor="#FFFFFF"
+            app:titleCentered="true"
+            android:elevation="0dp" />
+
+        <!-- Premium Date Selector -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:paddingHorizontal="24dp">
+
+            <View
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:layout_weight="1" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnPickDate"
+                style="@style/Widget.Material3.Button"
+                android:layout_width="wrap_content"
+                android:layout_height="48dp"
+                android:minHeight="48dp"
+                android:backgroundTint="#FFFFFF"
+                android:text="Today"
+                android:textColor="#000000"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                app:cornerRadius="24dp"
+                app:elevation="4dp"
+                app:icon="@drawable/ic_calendar"
+                app:iconSize="18dp"
+                app:iconTint="#000000"
+                app:ensureMinTouchTargetSize="true"
+                android:paddingHorizontal="20dp"
+                android:layout_marginEnd="12dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnClearDate"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="48dp"
+                android:minHeight="48dp"
+                android:text="CLEAR"
+                android:textColor="#FFFFFF"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.1"
+                app:ensureMinTouchTargetSize="true"
+                app:rippleColor="#40FFFFFF" />
+
+            <View
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:layout_weight="1" />
+
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Main Content Area -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
+        android:layout_marginTop="120dp"
         android:orientation="vertical"
-        android:padding="12dp"
-        android:layout_marginTop="?attr/actionBarSize">
+        android:background="#F8F9FA">
 
-        <!-- Top controls -->
-        <LinearLayout
+        <!-- Premium Divider -->
+        <View
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:paddingBottom="8dp">
-
-            <com.google.android.material.chip.ChipGroup
-                android:id="@+id/chipGroupType"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                app:singleSelection="true">
-
-                <com.google.android.material.chip.Chip
-                    android:id="@+id/chipPickup"
-                    style="@style/Widget.MaterialComponents.Chip.Choice"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:checkable="true"
-                    android:checked="true"
-                    android:text="Pickup" />
-
-                <com.google.android.material.chip.Chip
-                    android:id="@+id/chipDelivery"
-                    style="@style/Widget.MaterialComponents.Chip.Choice"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:checkable="true"
-                    android:text="Delivery" />
-            </com.google.android.material.chip.ChipGroup>
-
-            <LinearLayout
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal">
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnPickDate"
-                    style="@style/Widget.Material3.Button.OutlinedButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Today, Aug 12"
-                    android:textSize="12sp"
-                    app:icon="@drawable/ic_calendar"
-                    app:iconSize="16dp"
-                    app:cornerRadius="20dp"
-                    android:paddingHorizontal="16dp" />
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnClearDate"
-                    style="@style/Widget.MaterialComponents.Button.TextButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Clear" />
-            </LinearLayout>
-        </LinearLayout>
+            android:layout_height="1dp"
+            android:background="@drawable/premium_divider" />
 
         <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
             android:id="@+id/swipeRefresh"
             android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1">
+            android:layout_height="match_parent"
+            app:swipeRefreshLayoutProgressSpinnerBackgroundColor="#FFFFFF">
 
             <FrameLayout
                 android:layout_width="match_parent"
@@ -94,26 +111,61 @@
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
                     android:clipToPadding="false"
-                    android:paddingBottom="16dp" />
+                    android:paddingTop="16dp"
+                    android:paddingBottom="24dp"
+                    android:paddingHorizontal="16dp"
+                    android:scrollbarStyle="outsideOverlay"
+                    android:scrollbarThumbVertical="@drawable/premium_scrollbar" />
 
+                <!-- Premium Empty State -->
                 <LinearLayout
                     android:id="@+id/emptyState"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
                     android:orientation="vertical"
                     android:gravity="center"
-                    android:visibility="gone">
+                    android:visibility="gone"
+                    android:background="#F8F9FA">
+
+                    <!-- Empty State Icon -->
+                    <ImageView
+                        android:layout_width="80dp"
+                        android:layout_height="80dp"
+                        android:src="@drawable/ic_empty_orders"
+                        android:layout_marginBottom="24dp"
+                        android:alpha="0.6"
+                        app:tint="#666666" />
 
                     <com.google.android.material.textview.MaterialTextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="No orders found"
-                        android:textAppearance="?attr/textAppearanceTitleMedium"/>
+                        android:text="No Orders Found"
+                        android:textAppearance="?attr/textAppearanceHeadlineSmall"
+                        android:textColor="#1A1A1A"
+                        android:textStyle="bold"
+                        android:layout_marginBottom="8dp" />
 
                     <com.google.android.material.textview.MaterialTextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Try changing the date or refreshing."/>
+                        android:text="Try selecting a different date or pull down to refresh"
+                        android:textAppearance="?attr/textAppearanceBodyMedium"
+                        android:textColor="#666666"
+                        android:textAlignment="center"
+                        android:paddingHorizontal="32dp" />
+
+                    <!-- Refresh Suggestion -->
+                    <com.google.android.material.button.MaterialButton
+                        style="@style/Widget.Material3.Button.TextButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="REFRESH"
+                        android:textColor="#000000"
+                        android:textStyle="bold"
+                        android:layout_marginTop="16dp"
+                        app:rippleColor="#20000000"
+                        android:onClick="fetchOrders" />
+
                 </LinearLayout>
 
             </FrameLayout>

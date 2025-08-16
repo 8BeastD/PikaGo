@@ -8,7 +8,8 @@ import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
-import com.google.android.material.chip.Chip
+import com.google.android.material.datepicker.CalendarConstraints
+import com.google.android.material.datepicker.DateValidatorPointForward
 import com.google.android.material.datepicker.MaterialDatePicker
 import com.leoworks.pikago.adapters.AssignedOrderAdapter
 import com.leoworks.pikago.databinding.FragmentRideBinding
@@ -18,8 +19,9 @@ import io.github.jan.supabase.postgrest.from
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.*
+import java.time.*
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 class RideFragment : Fragment() {
 
@@ -29,17 +31,21 @@ class RideFragment : Fragment() {
     private lateinit var supabase: SupabaseClient
     private val adapter by lazy { AssignedOrderAdapter() }
 
-    private var selectedEpochDay: Long? = null // date filter (UTC millis at 00:00)
+    /** Selected day (UTC midnight from the picker). Always non-null; defaults to today. */
+    private var selectedEpochDayUtc: Long = MaterialDatePicker.todayInUtcMilliseconds()
+
     private var tickJob: Job? = null
-    private var currentMode = AssignedOrderAdapter.Mode.PICKUP
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Obtain from your App object
         supabase = App.supabase
     }
 
-    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
+    override fun onCreateView(
+        inflater: LayoutInflater,
+        container: ViewGroup?,
+        savedInstanceState: Bundle?
+    ): View {
         _binding = FragmentRideBinding.inflate(inflater, container, false)
         return binding.root
     }
@@ -62,86 +68,33 @@ class RideFragment : Fragment() {
 
         swipeRefresh.setOnRefreshListener { fetchOrders() }
 
-        // Chips
-        chipPickup.isChecked = true
-        chipPickup.setOnClickListener { onModeChanged(AssignedOrderAdapter.Mode.PICKUP) }
-        chipDelivery.setOnClickListener { onModeChanged(AssignedOrderAdapter.Mode.DELIVERY) }
-
-        // Set today's date initially
-        btnPickDate.text = getCurrentDateString()
+        // Button labels
+        btnPickDate.text = formatDateForButton(selectedEpochDayUtc)
         btnPickDate.setOnClickListener { openDatePicker() }
         btnClearDate.setOnClickListener {
-            selectedEpochDay = null
-            btnPickDate.text = getCurrentDateString()
+            selectedEpochDayUtc = MaterialDatePicker.todayInUtcMilliseconds()
+            btnPickDate.text = formatDateForButton(selectedEpochDayUtc)
             fetchOrders()
         }
     }
 
-    private fun onModeChanged(newMode: AssignedOrderAdapter.Mode) {
-        currentMode = newMode
-        (if (newMode == AssignedOrderAdapter.Mode.PICKUP) binding.chipPickup else binding.chipDelivery).isChecked = true
-        fetchOrders()
-    }
-
     private fun openDatePicker() {
+        val constraints = CalendarConstraints.Builder()
+            .setValidator(DateValidatorPointForward.now()) // block past calendar days
+            .build()
+
         val picker = MaterialDatePicker.Builder.datePicker()
             .setTitleText("Select date")
-            .setSelection(selectedEpochDay ?: MaterialDatePicker.todayInUtcMilliseconds())
+            .setCalendarConstraints(constraints)
+            .setSelection(selectedEpochDayUtc)
             .build()
 
         picker.addOnPositiveButtonClickListener { utcMillis ->
-            selectedEpochDay = utcMillis
+            selectedEpochDayUtc = utcMillis
             binding.btnPickDate.text = formatDateForButton(utcMillis)
             fetchOrders()
         }
         picker.show(parentFragmentManager, "date_picker")
-    }
-
-    private fun getCurrentDateString(): String {
-        val sdf = SimpleDateFormat("'Today', MMM dd", Locale.US)
-        return sdf.format(Date())
-    }
-
-    private fun formatDateForButton(utcMillis: Long): String {
-        val today = Calendar.getInstance()
-        val selectedDate = Calendar.getInstance().apply { timeInMillis = utcMillis }
-
-        return when {
-            isSameDay(today, selectedDate) -> getCurrentDateString()
-            isYesterday(today, selectedDate) -> "Yesterday"
-            isTomorrow(today, selectedDate) -> "Tomorrow"
-            else -> {
-                val sdf = SimpleDateFormat("MMM dd, yyyy", Locale.US)
-                sdf.format(Date(utcMillis))
-            }
-        }
-    }
-
-    private fun isSameDay(cal1: Calendar, cal2: Calendar): Boolean {
-        return cal1.get(Calendar.YEAR) == cal2.get(Calendar.YEAR) &&
-                cal1.get(Calendar.DAY_OF_YEAR) == cal2.get(Calendar.DAY_OF_YEAR)
-    }
-
-    private fun isYesterday(today: Calendar, selected: Calendar): Boolean {
-        val yesterday = Calendar.getInstance().apply {
-            timeInMillis = today.timeInMillis
-            add(Calendar.DAY_OF_YEAR, -1)
-        }
-        return isSameDay(yesterday, selected)
-    }
-
-    private fun isTomorrow(today: Calendar, selected: Calendar): Boolean {
-        val tomorrow = Calendar.getInstance().apply {
-            timeInMillis = today.timeInMillis
-            add(Calendar.DAY_OF_YEAR, 1)
-        }
-        return isSameDay(tomorrow, selected)
-    }
-
-    private fun toYMD(utcMillis: Long): String {
-        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-        sdf.timeZone = TimeZone.getTimeZone("UTC")
-        return sdf.format(Date(utcMillis))
     }
 
     private fun startTicker() {
@@ -166,44 +119,42 @@ class RideFragment : Fragment() {
         showLoading(true)
         viewLifecycleOwner.lifecycleScope.launch {
             try {
-                // Base query
+                val selectedYmd = toYMD(selectedEpochDayUtc) // "yyyy-MM-dd" of selected date
                 val table = supabase.from("assigned_orders")
 
-                // We filter by the mode: for pickup need non-null pickup_date & slot_start;
-                // for delivery need non-null delivery_date & slot_start
-                val rows: List<AssignedOrder> = if (selectedEpochDay == null) {
-                    table.select().decodeList()
-                } else {
-                    // Date filter
-                    val ymd = toYMD(selectedEpochDay!!)
-                    if (currentMode == AssignedOrderAdapter.Mode.PICKUP) {
-                        table.select {
-                            filter {
-                                eq("pickup_date", ymd)
-                            }
-                        }.decodeList()
-                    } else {
-                        table.select {
-                            filter {
-                                eq("delivery_date", ymd)
-                            }
-                        }.decodeList()
-                    }
+                // Pull exactly the selected day: (pickup_date = selectedYmd) ∪ (delivery_date = selectedYmd)
+                val rowsPickup: List<AssignedOrder> = table.select {
+                    filter { eq("pickup_date", selectedYmd) }
+                }.decodeList()
+
+                val rowsDelivery: List<AssignedOrder> = table.select {
+                    filter { eq("delivery_date", selectedYmd) }
+                }.decodeList()
+
+                // Merge and dedupe
+                val rows = (rowsPickup + rowsDelivery).distinctBy { it.id }
+
+                // If the selected day is TODAY, hide orders whose START time has already passed.
+                val todayYmd = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
+                val now = System.currentTimeMillis()
+
+                val filtered = rows.filter { r ->
+                    val startAt = startEpochMillis(r)
+                    // Keep if start time exists and (either selected day != today or start >= now)
+                    if (startAt == null) true
+                    else if (selectedYmd != todayYmd) true  // Fixed: use selectedYmd instead of ymd
+                    else startAt >= now
                 }
 
-                // Mode-based filtering and sorting in-memory (simple & clear)
-                val filtered = rows.filter { r ->
-                    if (currentMode == AssignedOrderAdapter.Mode.PICKUP)
-                        !r.pickup_date.isNullOrBlank() && !r.pickup_slot_start_time.isNullOrBlank()
-                    else
-                        !r.delivery_date.isNullOrBlank() && !r.delivery_slot_start_time.isNullOrBlank()
-                }.sortedWith(compareBy(
-                    { if (currentMode == AssignedOrderAdapter.Mode.PICKUP) rDateTimeMillis(it.pickup_date, it.pickup_slot_start_time) else rDateTimeMillis(it.delivery_date, it.delivery_slot_start_time) },
-                    { it.id }
-                ))
+                // Sort by the start time (pickup or delivery depending on status), then id
+                val sorted = filtered.sortedWith(
+                    compareBy<AssignedOrder> {
+                        startEpochMillis(it) ?: Long.MAX_VALUE
+                    }.thenBy { it.id }
+                )
 
-                adapter.submit(filtered, currentMode)
-                setEmptyVisible(filtered.isEmpty())
+                adapter.submit(sorted)
+                setEmptyVisible(sorted.isEmpty())
             } catch (e: Exception) {
                 setEmptyVisible(true)
                 Toast.makeText(requireContext(), "Failed to load: ${e.message}", Toast.LENGTH_LONG).show()
@@ -213,22 +164,56 @@ class RideFragment : Fragment() {
         }
     }
 
-    private fun rDateTimeMillis(dateStr: String?, timeStr: String?): Long {
-        return try {
-            if (dateStr.isNullOrBlank() || timeStr.isNullOrBlank()) Long.MAX_VALUE
-            else {
-                val ymd = dateStr.split("-").map { it.toInt() }
-                val hms = timeStr.split(":").map { it.toInt() }
-                val zone = TimeZone.getDefault().toZoneId()
-                val zdt = java.time.ZonedDateTime.of(
-                    ymd[0], ymd[1], ymd[2],
-                    hms[0], hms[1], hms[2],
-                    0, zone
-                )
-                zdt.toInstant().toEpochMilli()
-            }
-        } catch (_: Exception) {
-            Long.MAX_VALUE
+    // ---------- Helpers ----------
+
+    private fun toYMD(utcMillis: Long): String {
+        val ld = Instant.ofEpochMilli(utcMillis).atZone(ZoneId.of("UTC")).toLocalDate()
+        return ld.format(DateTimeFormatter.ISO_LOCAL_DATE)
+    }
+
+    private fun formatDateForButton(utcMillis: Long): String {
+        val sel = Instant.ofEpochMilli(utcMillis).atZone(ZoneId.systemDefault()).toLocalDate()
+        val today = LocalDate.now()
+        val label = when {
+            sel.isEqual(today) -> "Today"
+            sel.isEqual(today.plusDays(1)) -> "Tomorrow"
+            else -> sel.format(DateTimeFormatter.ofPattern("MMM dd, yyyy", Locale.getDefault()))
         }
+        return label
+    }
+
+    /** Decide whether this order is Pickup or Delivery based on status/fields. */
+    private fun isPickup(order: AssignedOrder): Boolean {
+        val s = (order.order_status ?: "").lowercase(Locale.getDefault())
+        val pickupStatuses = setOf("accepted", "assigned", "ready_for_pickup", "processing", "confirmed")
+        val deliveryStatuses = setOf("ready_for_delivery", "out_for_delivery", "shipped", "in_transit", "delivered")
+        return when {
+            s in pickupStatuses -> true
+            s in deliveryStatuses -> false
+            // fallback: if only pickup fields present -> pickup, otherwise delivery
+            !order.pickup_date.isNullOrBlank() && !order.pickup_slot_start_time.isNullOrBlank() -> true
+            else -> false
+        }
+    }
+
+    /** Compute epoch millis of the relevant slot START (pickup vs delivery). */
+    private fun startEpochMillis(order: AssignedOrder): Long? {
+        val zone = ZoneId.systemDefault()
+        val dateStr = if (isPickup(order)) order.pickup_date else order.delivery_date
+        val timeStr = if (isPickup(order)) order.pickup_slot_start_time else order.delivery_slot_start_time
+        if (dateStr.isNullOrBlank() || timeStr.isNullOrBlank()) return null
+
+        // Parse "HH:mm[:ss]"
+        val time = try {
+            LocalTime.parse(timeStr, DateTimeFormatter.ofPattern("H:mm[:ss]"))
+        } catch (_: Exception) {
+            return null
+        }
+        val date = try {
+            LocalDate.parse(dateStr, DateTimeFormatter.ISO_LOCAL_DATE)
+        } catch (_: Exception) {
+            return null
+        }
+        return ZonedDateTime.of(date, time, zone).toInstant().toEpochMilli()
     }
 }

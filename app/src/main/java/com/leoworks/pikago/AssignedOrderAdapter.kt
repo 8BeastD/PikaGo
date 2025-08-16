@@ -17,17 +17,14 @@ import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 import kotlin.math.max
 
 class AssignedOrderAdapter(
-    private var items: List<AssignedOrder> = emptyList(),
-    private var mode: Mode = Mode.PICKUP
+    private var items: List<AssignedOrder> = emptyList()
 ) : RecyclerView.Adapter<AssignedOrderAdapter.OrderVH>() {
 
-    enum class Mode { PICKUP, DELIVERY }
-
-    fun submit(list: List<AssignedOrder>, newMode: Mode) {
-        mode = newMode
+    fun submit(list: List<AssignedOrder>) {
         items = list
         notifyDataSetChanged()
     }
@@ -40,40 +37,55 @@ class AssignedOrderAdapter(
     override fun getItemCount(): Int = items.size
 
     override fun onBindViewHolder(holder: OrderVH, position: Int) {
-        holder.bind(items[position], mode)
+        holder.bind(items[position])
     }
 
     class OrderVH(v: View) : RecyclerView.ViewHolder(v) {
         private val txtOrderId: TextView = v.findViewById(R.id.txtOrderId)
+        private val txtDateLabel: TextView = v.findViewById(R.id.txtDateLabel)
         private val chipKind: Chip = v.findViewById(R.id.chipKind)
         private val txtSlot: TextView = v.findViewById(R.id.txtSlot)
+        private val txtSlotDay: TextView = v.findViewById(R.id.txtSlotDay)
         private val txtAmountMethod: TextView = v.findViewById(R.id.txtAmountMethod)
+        private val chipPaymentMethod: Chip = v.findViewById(R.id.chipPaymentMethod)
         private val txtCountdown: TextView = v.findViewById(R.id.txtCountdown)
+        private val txtCountdownHint: TextView? = v.findViewById(R.id.txtCountdownHint) // may be null if old layout
         private val txtStatus: TextView = v.findViewById(R.id.txtStatus)
         private val btnProceed: MaterialButton? = v.findViewById(R.id.btnProceed)
 
-        fun bind(order: AssignedOrder, mode: Mode) {
-            val isPickup = mode == Mode.PICKUP
+        fun bind(order: AssignedOrder) {
+            val isPickup = isPickup(order)
+
             txtOrderId.text = order.id
             chipKind.text = if (isPickup) "Pickup" else "Delivery"
+            chipKind.contentDescription = "Order type: ${chipKind.text}"
 
-            val slotDisplay = if (isPickup) order.pickup_slot_display_time else order.delivery_slot_display_time
-            txtSlot.text = "Slot: ${slotDisplay ?: "-"}"
-
-            val amount = order.total_amount ?: 0.0
-            val method = order.payment_method?.uppercase() ?: "-"
-            txtAmountMethod.text = "₹${formatMoney(amount)} • $method"
-
-            txtStatus.text = order.order_status ?: "-"
-
+            // Display "Today, Aug 16" style label based on the relevant date
             val dateStr = if (isPickup) order.pickup_date else order.delivery_date
+            txtDateLabel.text = prettyDateLong(dateStr)
+
+            // Slot display + small day label (Today/Tomorrow/Date)
+            val slotDisplay = if (isPickup) order.pickup_slot_display_time else order.delivery_slot_display_time
+            txtSlot.text = slotDisplay ?: "—"
+            txtSlotDay.text = prettyDay(dateStr)
+
+            // Amount + method
+            val amount = order.total_amount ?: 0.0
+            val method = order.payment_method?.uppercase(Locale.getDefault()) ?: "-"
+            txtAmountMethod.text = "₹${formatMoney(amount)} • $method"
+            chipPaymentMethod.text = method
+
+            // Status
+            txtStatus.text = order.order_status?.uppercase(Locale.getDefault()) ?: "-"
+
+            // Countdown & hint
             val timeStr = if (isPickup) order.pickup_slot_start_time else order.delivery_slot_start_time
             txtCountdown.text = buildCountdown(dateStr, timeStr)
+            txtCountdownHint?.text = if (isPickup) "Be ready for pickup" else "Be ready for delivery"
 
             btnProceed?.setOnClickListener {
                 val activity = itemView.context as? FragmentActivity ?: return@setOnClickListener
                 try {
-                    // Navigate with only the orderId; OrderDetailsFragment fetches everything itself
                     val fragment = OrderDetailsFragment.newInstance(order.id)
                     activity.supportFragmentManager
                         .beginTransaction()
@@ -86,15 +98,56 @@ class AssignedOrderAdapter(
             }
         }
 
+        // ----- helpers -----
+
+        private fun isPickup(order: AssignedOrder): Boolean {
+            val s = (order.order_status ?: "").lowercase(Locale.getDefault())
+            val pickupStatuses = setOf("accepted", "assigned", "ready_for_pickup", "processing", "confirmed")
+            val deliveryStatuses = setOf("ready_for_delivery", "out_for_delivery", "shipped", "in_transit", "delivered")
+            return when {
+                s in pickupStatuses -> true
+                s in deliveryStatuses -> false
+                !order.pickup_date.isNullOrBlank() && !order.pickup_slot_start_time.isNullOrBlank() -> true
+                else -> false
+            }
+        }
+
+        private fun prettyDateLong(dateStr: String?): String {
+            if (dateStr.isNullOrBlank()) return "—"
+            return try {
+                val date = LocalDate.parse(dateStr, DateTimeFormatter.ISO_LOCAL_DATE)
+                val today = LocalDate.now()
+                val base = date.format(DateTimeFormatter.ofPattern("MMM dd", Locale.getDefault()))
+                when {
+                    date.isEqual(today) -> "Today, $base"
+                    date.isEqual(today.plusDays(1)) -> "Tomorrow, $base"
+                    else -> base
+                }
+            } catch (_: Exception) { "—" }
+        }
+
+        private fun prettyDay(dateStr: String?): String {
+            if (dateStr.isNullOrBlank()) return "—"
+            return try {
+                val date = LocalDate.parse(dateStr, DateTimeFormatter.ISO_LOCAL_DATE)
+                val today = LocalDate.now()
+                when {
+                    date.isEqual(today) -> "Today"
+                    date.isEqual(today.plusDays(1)) -> "Tomorrow"
+                    else -> date.format(DateTimeFormatter.ofPattern("MMM dd", Locale.getDefault()))
+                }
+            } catch (_: Exception) { "—" }
+        }
+
         private fun formatMoney(value: Double): String {
-            return if (value % 1.0 == 0.0) value.toInt().toString() else String.format("%.2f", value)
+            return if (value % 1.0 == 0.0) value.toInt().toString() else String.format(Locale.getDefault(),"%.2f", value)
         }
 
         private fun buildCountdown(dateStr: String?, timeStr: String?): String {
             if (dateStr.isNullOrBlank() || timeStr.isNullOrBlank()) return "Starts in —"
             return try {
                 val date = LocalDate.parse(dateStr, DateTimeFormatter.ISO_LOCAL_DATE)
-                val time = LocalTime.parse(timeStr, DateTimeFormatter.ofPattern("HH:mm:ss"))
+                val time = LocalTime.parse(timeStr, DateTimeFormatter.ofPattern("H:mm[:ss]"))
                 val zone = ZoneId.systemDefault()
                 val target = ZonedDateTime.of(date, time, zone).toInstant().toEpochMilli()
                 val now = System.currentTimeMillis()

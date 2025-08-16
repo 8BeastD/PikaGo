@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_margin="12dp"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
@@ -16,7 +17,7 @@
         android:layout_height="wrap_content"
         android:background="@drawable/card_gradient_background">
 
-        <!-- Header Section -->
+        <!-- Header -->
         <LinearLayout
             android:orientation="horizontal"
             android:gravity="center_vertical"
@@ -37,17 +38,17 @@
                     android:textColor="@color/primary_text"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="ORD175385800031"
-                    android:letterSpacing="0.02" />
+                    android:letterSpacing="0.02"
+                    tools:text="ORD123456789" />
 
                 <com.google.android.material.textview.MaterialTextView
-                    android:id="@+id/txtOrderDate"
+                    android:id="@+id/txtDateLabel"
                     android:textSize="12sp"
                     android:textColor="@color/secondary_text"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Today, Aug 12"
-                    android:layout_marginTop="2dp" />
+                    android:layout_marginTop="2dp"
+                    tools:text="Today, Aug 16" />
             </LinearLayout>
 
             <com.google.android.material.chip.Chip
@@ -55,15 +56,18 @@
                 style="@style/Widget.Material3.Chip.Assist"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Pickup"
                 android:textColor="@color/white"
                 app:chipBackgroundColor="@color/black"
                 app:chipCornerRadius="20dp"
+                app:ensureMinTouchTargetSize="true"
+                app:chipMinHeight="32dp"
                 android:textSize="12sp"
-                android:textStyle="bold" />
+                android:textStyle="bold"
+                android:contentDescription="Order type"
+                tools:text="Pickup" />
         </LinearLayout>
 
-        <!-- Time Slot Section -->
+        <!-- Slot -->
         <LinearLayout
             android:orientation="horizontal"
             android:gravity="center_vertical"
@@ -90,23 +94,23 @@
                     android:id="@+id/txtSlot"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="08:00 AM - 10:00 AM"
                     android:textSize="16sp"
                     android:textStyle="bold"
-                    android:textColor="@color/primary_text" />
+                    android:textColor="@color/primary_text"
+                    tools:text="08:00 PM - 10:00 PM" />
 
                 <com.google.android.material.textview.MaterialTextView
-                    android:id="@+id/txtSlotDate"
+                    android:id="@+id/txtSlotDay"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Today"
                     android:textSize="12sp"
                     android:textColor="@color/secondary_text"
-                    android:layout_marginTop="2dp" />
+                    android:layout_marginTop="2dp"
+                    tools:text="Today" />
             </LinearLayout>
         </LinearLayout>
 
-        <!-- Amount and Payment Section -->
+        <!-- Amount / Method -->
         <LinearLayout
             android:orientation="horizontal"
             android:gravity="center_vertical"
@@ -125,10 +129,10 @@
                 android:id="@+id/txtAmountMethod"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="₹153.90"
                 android:textSize="16sp"
                 android:textStyle="bold"
-                android:textColor="@color/black" />
+                android:textColor="@color/black"
+                tools:text="₹266 • COD" />
 
             <View
                 android:layout_width="6dp"
@@ -141,15 +145,16 @@
                 style="@style/Widget.Material3.Chip.Filter"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="COD"
                 android:textSize="10sp"
                 app:chipMinHeight="24dp"
                 app:chipCornerRadius="12dp"
                 app:chipBackgroundColor="@color/black"
-                android:textColor="@color/white" />
+                android:textColor="@color/white"
+                app:ensureMinTouchTargetSize="true"
+                tools:text="COD" />
         </LinearLayout>
 
-        <!-- Countdown Section -->
+        <!-- Countdown -->
         <LinearLayout
             android:orientation="horizontal"
             android:gravity="center_vertical"
@@ -176,12 +181,13 @@
                     android:id="@+id/txtCountdown"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Starting in 02:15:30"
                     android:textSize="16sp"
                     android:textStyle="bold"
-                    android:textColor="@color/black" />
+                    android:textColor="@color/black"
+                    tools:text="Starts in 02:15:30" />
 
                 <com.google.android.material.textview.MaterialTextView
+                    android:id="@+id/txtCountdownHint"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="Be ready for pickup"
@@ -191,7 +197,7 @@
             </LinearLayout>
         </LinearLayout>
 
-        <!-- Status and Action Section -->
+        <!-- Status + Action -->
         <LinearLayout
             android:orientation="horizontal"
             android:gravity="center_vertical"
@@ -215,22 +221,24 @@
                     android:id="@+id/txtStatus"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Accepted"
                     android:textSize="14sp"
                     android:textStyle="bold"
                     android:textColor="@color/black"
-                    android:textAllCaps="true" />
+                    android:textAllCaps="true"
+                    tools:text="ASSIGNED" />
             </LinearLayout>
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnProceed"
                 style="@style/Widget.Material3.Button.UnelevatedButton"
                 android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
+                android:layout_height="48dp"
+                android:minHeight="48dp"
+                app:ensureMinTouchTargetSize="true"
                 android:text="Proceed"
                 android:textSize="12sp"
                 android:textStyle="bold"
-                app:cornerRadius="20dp"
+                app:cornerRadius="24dp"
                 android:paddingHorizontal="20dp"
                 android:paddingVertical="8dp"
                 app:backgroundTint="@color/black"
