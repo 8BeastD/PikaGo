@@ -25,7 +25,11 @@ class AssignedOrderAdapter(
 ) : RecyclerView.Adapter<AssignedOrderAdapter.OrderVH>() {
 
     fun submit(list: List<AssignedOrder>) {
-        items = list
+        // Filter out completed orders
+        items = list.filter { order ->
+            val status = order.order_status?.lowercase(Locale.getDefault()) ?: ""
+            status != "completed"
+        }
         notifyDataSetChanged()
     }
 
@@ -102,14 +106,31 @@ class AssignedOrderAdapter(
 
         private fun isPickup(order: AssignedOrder): Boolean {
             val s = (order.order_status ?: "").lowercase(Locale.getDefault())
-            val pickupStatuses = setOf("accepted", "assigned", "ready_for_pickup", "processing", "confirmed")
-            val deliveryStatuses = setOf("ready_for_delivery", "out_for_delivery", "shipped", "in_transit", "delivered")
-            return when {
-                s in pickupStatuses -> true
-                s in deliveryStatuses -> false
-                !order.pickup_date.isNullOrBlank() && !order.pickup_slot_start_time.isNullOrBlank() -> true
-                else -> false
+
+            // Hide completed orders - they should not be shown
+            if (s == "completed") {
+                return false // This will be filtered out at adapter level
             }
+
+            // Check if status contains "delivery" anywhere - if so, it's delivery phase
+            if (s.contains("delivery")) {
+                return false
+            }
+
+            // Explicit delivery statuses
+            val deliveryStatuses = setOf("out_for_delivery", "shipped", "in_transit", "delivered", "ready_to_delivery")
+            if (s in deliveryStatuses) {
+                return false
+            }
+
+            // Explicit pickup statuses
+            val pickupStatuses = setOf("accepted", "assigned", "ready_for_pickup", "processing", "confirmed")
+            if (s in pickupStatuses) {
+                return true
+            }
+
+            // Default fallback: if pickup info exists, assume pickup
+            return !order.pickup_date.isNullOrBlank() && !order.pickup_slot_start_time.isNullOrBlank()
         }
 
         private fun prettyDateLong(dateStr: String?): String {

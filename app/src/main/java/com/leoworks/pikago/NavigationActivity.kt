@@ -101,6 +101,8 @@ class NavigationActivity : AppCompatActivity() {
     private lateinit var progressIndicator: CircularProgressIndicator
     private lateinit var phaseChip: Chip
     private lateinit var callCustomerBtn: MaterialButton
+    private lateinit var fabStart: ExtendedFloatingActionButton
+    private lateinit var fabRecenter: ExtendedFloatingActionButton
 
     // Premium animation handlers
     private val handler = Handler(Looper.getMainLooper())
@@ -144,32 +146,20 @@ class NavigationActivity : AppCompatActivity() {
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
 
             // Apply dynamic margins to all floating elements
-            val bottomMargin = systemBars.bottom + (12 * resources.displayMetrics.density).toInt()
+            val bottomMargin = systemBars.bottom + (16 * resources.displayMetrics.density).toInt()
+            val topMargin = systemBars.top + (8 * resources.displayMetrics.density).toInt()
 
-            // Adjust FABs with staggered positioning
-            findViewById<ExtendedFloatingActionButton>(R.id.fabStart)?.let { fab ->
-                val params = fab.layoutParams as? android.view.ViewGroup.MarginLayoutParams
-                params?.bottomMargin = bottomMargin + (140 * resources.displayMetrics.density).toInt()
-                fab.layoutParams = params
-            }
-
-            findViewById<ExtendedFloatingActionButton>(R.id.fabRecenter)?.let { fab ->
-                val params = fab.layoutParams as? android.view.ViewGroup.MarginLayoutParams
-                params?.bottomMargin = bottomMargin + (200 * resources.displayMetrics.density).toInt()
-                fab.layoutParams = params
+            // Status card with top margin
+            statusCard?.let { card ->
+                val params = card.layoutParams as? android.view.ViewGroup.MarginLayoutParams
+                params?.topMargin = topMargin
+                card.layoutParams = params
             }
 
             // Swipe card at bottom
             swipeCard?.let { card ->
                 val params = card.layoutParams as? android.view.ViewGroup.MarginLayoutParams
                 params?.bottomMargin = bottomMargin
-                card.layoutParams = params
-            }
-
-            // Status card with top margin
-            statusCard?.let { card ->
-                val params = card.layoutParams as? android.view.ViewGroup.MarginLayoutParams
-                params?.topMargin = systemBars.top + (8 * resources.displayMetrics.density).toInt()
                 card.layoutParams = params
             }
 
@@ -197,28 +187,44 @@ class NavigationActivity : AppCompatActivity() {
         progressIndicator = findViewById(R.id.progressIndicator)
         phaseChip = findViewById(R.id.phaseChip)
         callCustomerBtn = findViewById(R.id.callCustomerBtn)
+        fabStart = findViewById(R.id.fabStart)
+        fabRecenter = findViewById(R.id.fabRecenter)
 
-        // Premium FAB setup
-        findViewById<ExtendedFloatingActionButton>(R.id.fabStart).apply {
+        // Premium FAB setup with animations
+        fabStart.apply {
             setOnClickListener { openGoogleMapsTurnByTurn() }
-            // Add premium entrance animation
             scaleX = 0f
             scaleY = 0f
-            animate().scaleX(1f).scaleY(1f).setDuration(800).setInterpolator(AccelerateDecelerateInterpolator()).start()
+            animate().scaleX(1f).scaleY(1f).setDuration(800)
+                .setInterpolator(AccelerateDecelerateInterpolator()).start()
         }
 
-        findViewById<ExtendedFloatingActionButton>(R.id.fabRecenter).apply {
+        fabRecenter.apply {
             setOnClickListener { fitBounds() }
-            // Delayed entrance animation
             scaleX = 0f
             scaleY = 0f
-            animate().scaleX(1f).scaleY(1f).setDuration(800).setStartDelay(200).setInterpolator(AccelerateDecelerateInterpolator()).start()
+            animate().scaleX(1f).scaleY(1f).setDuration(800).setStartDelay(200)
+                .setInterpolator(AccelerateDecelerateInterpolator()).start()
         }
 
         callCustomerBtn.setOnClickListener { callCustomer() }
 
         setupPremiumSwipeSlider()
         startStatusUpdates()
+
+        // Make swipe card initially visible but with subtle animation
+        swipeCard.apply {
+            alpha = 0f
+            translationY = 100f
+            visibility = View.VISIBLE
+            animate()
+                .alpha(1f)
+                .translationY(0f)
+                .setDuration(1000)
+                .setStartDelay(500)
+                .setInterpolator(AccelerateDecelerateInterpolator())
+                .start()
+        }
     }
 
     private fun setupPremiumSwipeSlider() {
@@ -233,18 +239,13 @@ class NavigationActivity : AppCompatActivity() {
                     value >= 95f -> {
                         triggerSuccessHaptic()
                         handleSwipeCompletion()
-                        // Premium completion animation
                         swipeCompletionAnimation()
                     }
                 }
 
-                // Dynamic color change based on progress
+                // Update slider appearance based on progress
                 val progress = value / 100f
-                val blackColor = ContextCompat.getColorStateList(this, android.R.color.black)
-                val whiteColor = ContextCompat.getColorStateList(this, android.R.color.white)
-
-                blackColor?.let { swipeSlider.thumbTintList = it }
-                whiteColor?.let { swipeSlider.trackActiveTintList = it }
+                slider.alpha = 0.8f + (progress * 0.2f)
             }
         }
 
@@ -259,9 +260,11 @@ class NavigationActivity : AppCompatActivity() {
                 if (slider.value < 95f) {
                     // Smooth reset animation
                     swipeAnimator = ValueAnimator.ofFloat(slider.value, 0f).apply {
-                        duration = 300
+                        duration = 400
                         interpolator = AccelerateDecelerateInterpolator()
-                        addUpdateListener { slider.value = it.animatedValue as Float }
+                        addUpdateListener {
+                            slider.value = it.animatedValue as Float
+                        }
                         start()
                     }
                 }
@@ -283,10 +286,50 @@ class NavigationActivity : AppCompatActivity() {
 
             // Premium map styling
             map.uiSettings.apply {
-                isZoomControlsEnabled = false // We'll use our premium controls
+                isZoomControlsEnabled = false
                 isCompassEnabled = true
                 isMyLocationButtonEnabled = false
                 isMapToolbarEnabled = false
+                isRotateGesturesEnabled = true
+                isTiltGesturesEnabled = true
+            }
+
+            // Set map style for premium look (optional dark mode)
+            try {
+                if (isDarkMode()) {
+                    // Try to load dark map style if available
+                    val darkStyleJson = """
+                        [
+                          {
+                            "elementType": "geometry",
+                            "stylers": [{"color": "#242f3e"}]
+                          },
+                          {
+                            "elementType": "labels.text.stroke",
+                            "stylers": [{"color": "#242f3e"}]
+                          },
+                          {
+                            "elementType": "labels.text.fill",
+                            "stylers": [{"color": "#746855"}]
+                          },
+                          {
+                            "featureType": "road",
+                            "elementType": "geometry",
+                            "stylers": [{"color": "#38414e"}]
+                          },
+                          {
+                            "featureType": "water",
+                            "elementType": "geometry",
+                            "stylers": [{"color": "#17263c"}]
+                          }
+                        ]
+                    """.trimIndent()
+
+                    val mapStyle = com.google.android.gms.maps.model.MapStyleOptions(darkStyleJson)
+                    map.setMapStyle(mapStyle)
+                }
+            } catch (e: Exception) {
+                // Style loading failed, continue with default
             }
 
             enableMyLocation()
@@ -300,6 +343,11 @@ class NavigationActivity : AppCompatActivity() {
                 lifecycleScope.launch { resolveDestinationFromSupabase() }
             }
         }
+    }
+
+    private fun isDarkMode(): Boolean {
+        val nightMode = resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK
+        return nightMode == android.content.res.Configuration.UI_MODE_NIGHT_YES
     }
 
     private fun startLocationTracking() {
@@ -327,6 +375,11 @@ class NavigationActivity : AppCompatActivity() {
                     distanceToDestination = calculateDistance(newLatLng, dest)
                     estimatedTime = calculateETA(distanceToDestination, location.speed)
                     updateStatusUI()
+                }
+
+                // Auto-update route
+                currentDestLatLng?.let { dest ->
+                    drawRoute(newLatLng, dest)
                 }
             }
         }
@@ -372,12 +425,13 @@ class NavigationActivity : AppCompatActivity() {
                 "Calculating ETA..."
             }
 
-            // Update progress indicator based on phase
-            val progress = when (currentPhase) {
+            // Update progress indicator based on phase and proximity
+            val baseProgress = when (currentPhase) {
                 NavigationPhase.PICKUP -> 25
                 NavigationPhase.DELIVERY -> 75
             }
-            progressIndicator.setProgressCompat(progress, true)
+            val proximityBonus = if (distanceToDestination > 0 && distanceToDestination < 0.5) 15 else 0
+            progressIndicator.setProgressCompat(baseProgress + proximityBonus, true)
         }
     }
 
@@ -388,21 +442,35 @@ class NavigationActivity : AppCompatActivity() {
         }
 
         val colorRes = when (currentPhase) {
-            NavigationPhase.PICKUP -> android.R.color.black
-            NavigationPhase.DELIVERY -> android.R.color.black
+            NavigationPhase.PICKUP -> R.color.pickup_color
+            NavigationPhase.DELIVERY -> R.color.delivery_color
         }
 
-        val chipColor = ContextCompat.getColorStateList(this, colorRes)
-        chipColor?.let { phaseChip.chipBackgroundColor = it }
+        try {
+            val chipColor = ContextCompat.getColorStateList(this, colorRes)
+            chipColor?.let { phaseChip.chipBackgroundColor = it }
+        } catch (e: Exception) {
+            // Fallback to default colors
+            val fallbackColor = ContextCompat.getColorStateList(this, android.R.color.black)
+            fallbackColor?.let { phaseChip.chipBackgroundColor = it }
+        }
     }
 
     private fun checkArrivalProximity() {
         if (distanceToDestination > 0 && distanceToDestination < 0.1) { // Within 100 meters
             // Premium arrival notification
-            if (swipeCard.alpha != 1f) {
-                swipeCard.animate().alpha(1f).scaleX(1.05f).scaleY(1.05f).setDuration(300).start()
+            if (swipeCard.alpha < 1f || swipeCard.scaleX < 1.05f) {
+                swipeCard.animate()
+                    .alpha(1f)
+                    .scaleX(1.05f)
+                    .scaleY(1.05f)
+                    .setDuration(300)
+                    .start()
                 triggerHapticFeedback()
                 toast("🎯 You've arrived! Complete your task.")
+
+                // Pulse animation for attention
+                startSwipePulse()
             }
         }
     }
@@ -476,13 +544,22 @@ class NavigationActivity : AppCompatActivity() {
         pickupObj: JSONObject?,
         dropObj: JSONObject?
     ): Triple<NavigationPhase, JSONObject?, String> {
+
+        // FIXED: Handle "ready for delivery" and similar statuses
         val preferredPickup = setOf("accepted", "pending", "assigned", "in_progress")
-        val preferredDrop = setOf("picked_up", "out_for_delivery")
+        val preferredDrop = setOf("picked_up", "out_for_delivery", "ready_for_delivery", "ready for delivery")
 
         return when {
-            status in preferredPickup -> Triple(NavigationPhase.PICKUP, pickupObj ?: dropObj, "Pickup Location")
-            status in preferredDrop -> Triple(NavigationPhase.DELIVERY, dropObj ?: pickupObj, "Delivery Location")
+            status in preferredDrop -> {
+                // For delivery phase: pickup = dropAddress, delivery = addressDetails
+                Triple(NavigationPhase.DELIVERY, dropObj ?: pickupObj, "Delivery Location")
+            }
+            status in preferredPickup -> {
+                // For pickup phase: pickup = addressDetails, delivery = dropAddress
+                Triple(NavigationPhase.PICKUP, pickupObj ?: dropObj, "Pickup Location")
+            }
             else -> {
+                // Default logic based on available addresses
                 if (pickupObj != null && status != "delivered" && status != "completed") {
                     Triple(NavigationPhase.PICKUP, pickupObj, "Pickup Location")
                 } else {
@@ -506,14 +583,16 @@ class NavigationActivity : AppCompatActivity() {
             }
         }
 
+        // Reset slider
+        swipeSlider.value = 0f
+
         // Premium entrance animation for swipe card
         swipeCard.apply {
-            alpha = 0f
-            translationY = 200f
-            visibility = View.VISIBLE
             animate()
                 .alpha(1f)
                 .translationY(0f)
+                .scaleX(1f)
+                .scaleY(1f)
                 .setDuration(600)
                 .setInterpolator(AccelerateDecelerateInterpolator())
                 .start()
@@ -534,7 +613,7 @@ class NavigationActivity : AppCompatActivity() {
             progressIndicator.visibility = View.VISIBLE
 
             supabase.from("assigned_orders").update({
-                set("order_status", "picked_up")
+                set("order_status", "ready_for_delivery")
             }) {
                 filter { eq("id", orderId) }
             }
@@ -544,15 +623,16 @@ class NavigationActivity : AppCompatActivity() {
 
             currentPhase = NavigationPhase.DELIVERY
 
+            // FIXED: For delivery phase after pickup, use dropAddress as destination
             val deliveryObj = orderData?.dropAddress?.toJSONObject()
             val deliveryDest = deliveryObj?.toLatLng()
 
             if (deliveryDest != null) {
                 // Premium transition animation
                 swipeCard.animate()
-                    .alpha(0f)
-                    .scaleX(0.8f)
-                    .scaleY(0.8f)
+                    .alpha(0.7f)
+                    .scaleX(0.9f)
+                    .scaleY(0.9f)
                     .setDuration(300)
                     .withEndAction {
                         setDestination(deliveryDest, "Delivery Location")
@@ -594,7 +674,7 @@ class NavigationActivity : AppCompatActivity() {
     }
 
     private fun celebrateCompletion() {
-        // Hide swipe card with celebration animation
+        // Hide UI elements with celebration animation
         swipeCard.animate()
             .alpha(0f)
             .scaleX(1.2f)
@@ -607,6 +687,9 @@ class NavigationActivity : AppCompatActivity() {
             .translationY(-100f)
             .setDuration(400)
             .start()
+
+        fabStart.animate().alpha(0f).scaleX(0f).scaleY(0f).setDuration(300).start()
+        fabRecenter.animate().alpha(0f).scaleX(0f).scaleY(0f).setDuration(300).start()
 
         // Show success message and exit
         handler.postDelayed({
@@ -623,17 +706,19 @@ class NavigationActivity : AppCompatActivity() {
         destinationMarker?.remove()
         routePolyline?.remove()
 
-        // Add premium destination marker
+        // Add premium destination marker with custom icons
+        val markerColor = if (label.contains("pickup", true)) {
+            BitmapDescriptorFactory.HUE_VIOLET
+        } else {
+            BitmapDescriptorFactory.HUE_BLUE
+        }
+
         destinationMarker = map.addMarker(
             MarkerOptions()
                 .position(latLng)
                 .title(label)
-                .icon(BitmapDescriptorFactory.defaultMarker(
-                    if (label.contains("pickup", true))
-                        BitmapDescriptorFactory.HUE_VIOLET
-                    else
-                        BitmapDescriptorFactory.HUE_BLUE
-                ))
+                .snippet("Tap for details")
+                .icon(BitmapDescriptorFactory.defaultMarker(markerColor))
         )
 
         fitBounds()
@@ -655,16 +740,19 @@ class NavigationActivity : AppCompatActivity() {
     }
 
     private fun drawRoute(start: LatLng, end: LatLng) {
-        // Simple straight line route (premium apps would use Google Directions API)
         val map = googleMap ?: return
 
         routePolyline?.remove()
         routePolyline = map.addPolyline(
             PolylineOptions()
                 .add(start, end)
-                .width(8f)
+                .width(10f)
                 .color(ContextCompat.getColor(this, android.R.color.black))
                 .geodesic(true)
+                .pattern(listOf(
+                    com.google.android.gms.maps.model.Dash(20f),
+                    com.google.android.gms.maps.model.Gap(10f)
+                ))
         )
     }
 
@@ -729,19 +817,15 @@ class NavigationActivity : AppCompatActivity() {
         }
 
         try {
-            // Use a more conservative padding to avoid the "view size too small" error
-            val padding = 100 // Reduced from 150
-            val minPadding = 50
-
-            // Calculate effective padding based on view size
+            val padding = 120
             val effectivePadding = when {
-                mapView.width < 400 || mapView.height < 400 -> minPadding
+                mapView.width < 400 || mapView.height < 400 -> 60
                 else -> padding
             }
 
             map.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds, effectivePadding))
         } catch (e: Exception) {
-            // Fallback to simple zoom if bounds calculation fails
+            // Fallback to simple zoom
             try {
                 val center = LatLng(
                     (bounds.northeast.latitude + bounds.southwest.latitude) / 2,
@@ -836,8 +920,8 @@ class NavigationActivity : AppCompatActivity() {
 
     private fun startSwipePulse() {
         pulseAnimator?.cancel()
-        pulseAnimator = ObjectAnimator.ofFloat(swipeCard, "scaleX", 1f, 1.02f, 1f).apply {
-            duration = 1000
+        pulseAnimator = ObjectAnimator.ofFloat(swipeCard, "alpha", 1f, 0.8f, 1f).apply {
+            duration = 1500
             repeatCount = ObjectAnimator.INFINITE
             repeatMode = ObjectAnimator.REVERSE
             start()
@@ -846,7 +930,7 @@ class NavigationActivity : AppCompatActivity() {
 
     private fun stopSwipePulse() {
         pulseAnimator?.cancel()
-        swipeCard.animate().scaleX(1f).scaleY(1f).setDuration(200).start()
+        swipeCard.animate().alpha(1f).setDuration(200).start()
     }
 
     private fun swipeCompletionAnimation() {

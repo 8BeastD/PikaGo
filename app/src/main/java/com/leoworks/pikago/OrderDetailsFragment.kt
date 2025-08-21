@@ -167,8 +167,24 @@ class OrderDetailsFragment : Fragment() {
     }
 
     private fun bindAddresses() {
-        pickupAddress = assigned?.addressDetails?.toJSONObject()
-        deliveryAddress = assigned?.dropAddress?.toJSONObject()
+        val a = assigned
+        val statusRaw = a?.orderStatus
+
+        val pickupJson = a?.addressDetails?.toJSONObject()
+        val dropJson = a?.dropAddress?.toJSONObject()
+
+        // Match NavigationActivity logic: if status contains "delivery", swap addresses
+        val status = statusRaw?.lowercase().orEmpty()
+
+        if (status.contains("delivery")) {
+            // For delivery phase: pickup = dropAddress, delivery = addressDetails
+            pickupAddress = dropJson
+            deliveryAddress = pickupJson
+        } else {
+            // For pickup phase: pickup = addressDetails, delivery = dropAddress
+            pickupAddress = pickupJson
+            deliveryAddress = dropJson
+        }
 
         // Address lines
         binding.txtPickupAddress.text = pickupAddress?.toPrettyAddress() ?: "Address not available"
@@ -192,11 +208,9 @@ class OrderDetailsFragment : Fragment() {
             OrderItem(
                 name = it.productName ?: "-",
                 description = listOfNotNull(it.serviceType?.takeIf { s -> s.isNotBlank() }).joinToString(" • "),
-                // If DB gave a line total, use it; otherwise product+service:
                 price = (it.totalPrice ?: ((it.productPrice ?: 0.0) + (it.servicePrice ?: 0.0))),
                 quantity = it.quantity ?: 0,
                 imageUrl = it.productImage.orEmpty(),
-                // optional passthroughs
                 id = it.id,
                 orderId = it.orderId,
                 productId = it.productId,
@@ -219,7 +233,6 @@ class OrderDetailsFragment : Fragment() {
     // ---------------- Actions ----------------
 
     private fun startNavigation() {
-        // Hand off to NavigationActivity; it decides pickup/drop based on order_status
         try {
             val intent = android.content.Intent(
                 requireContext(),
@@ -235,6 +248,7 @@ class OrderDetailsFragment : Fragment() {
 
     private fun callCustomer() {
         try {
+            // Use the currently bound deliveryAddress first; fall back to pickup if needed
             val phone = (deliveryAddress ?: pickupAddress)?.optString("phone_number").orEmpty()
             if (phone.isNotBlank()) {
                 val intent = android.content.Intent(android.content.Intent.ACTION_DIAL).apply {
