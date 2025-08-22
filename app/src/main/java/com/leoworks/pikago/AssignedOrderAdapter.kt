@@ -58,18 +58,29 @@ class AssignedOrderAdapter(
         private val btnProceed: MaterialButton? = v.findViewById(R.id.btnProceed)
 
         fun bind(order: AssignedOrder) {
-            val isPickup = isPickup(order)
+            val currentPhase = determineCurrentPhase(order)
 
             txtOrderId.text = order.id
-            chipKind.text = if (isPickup) "Pickup" else "Delivery"
+            chipKind.text = when (currentPhase.phase) {
+                OrderPhase.PICKUP_TO_PICKUP -> "Pickup Collection"
+                OrderPhase.PICKUP_TO_STORE -> "To Store"
+                OrderPhase.DELIVERY_FROM_STORE -> "From Store"
+                OrderPhase.DELIVERY_TO_CUSTOMER -> "Final Delivery"
+            }
             chipKind.contentDescription = "Order type: ${chipKind.text}"
 
-            // Display "Today, Aug 16" style label based on the relevant date
-            val dateStr = if (isPickup) order.pickup_date else order.delivery_date
+            // Display date based on the current phase
+            val dateStr = when (currentPhase.phase) {
+                OrderPhase.PICKUP_TO_PICKUP, OrderPhase.PICKUP_TO_STORE -> order.pickup_date
+                OrderPhase.DELIVERY_FROM_STORE, OrderPhase.DELIVERY_TO_CUSTOMER -> order.delivery_date
+            }
             txtDateLabel.text = prettyDateLong(dateStr)
 
-            // Slot display + small day label (Today/Tomorrow/Date)
-            val slotDisplay = if (isPickup) order.pickup_slot_display_time else order.delivery_slot_display_time
+            // Slot display + small day label
+            val slotDisplay = when (currentPhase.phase) {
+                OrderPhase.PICKUP_TO_PICKUP, OrderPhase.PICKUP_TO_STORE -> order.pickup_slot_display_time
+                OrderPhase.DELIVERY_FROM_STORE, OrderPhase.DELIVERY_TO_CUSTOMER -> order.delivery_slot_display_time
+            }
             txtSlot.text = slotDisplay ?: "—"
             txtSlotDay.text = prettyDay(dateStr)
 
@@ -83,9 +94,18 @@ class AssignedOrderAdapter(
             txtStatus.text = order.order_status?.uppercase(Locale.getDefault()) ?: "-"
 
             // Countdown & hint
-            val timeStr = if (isPickup) order.pickup_slot_start_time else order.delivery_slot_start_time
+            val timeStr = when (currentPhase.phase) {
+                OrderPhase.PICKUP_TO_PICKUP, OrderPhase.PICKUP_TO_STORE -> order.pickup_slot_start_time
+                OrderPhase.DELIVERY_FROM_STORE, OrderPhase.DELIVERY_TO_CUSTOMER -> order.delivery_slot_start_time
+            }
             txtCountdown.text = buildCountdown(dateStr, timeStr)
-            txtCountdownHint?.text = if (isPickup) "Be ready for pickup" else "Be ready for delivery"
+
+            txtCountdownHint?.text = when (currentPhase.phase) {
+                OrderPhase.PICKUP_TO_PICKUP -> "Ready to collect from pickup"
+                OrderPhase.PICKUP_TO_STORE -> "Ready to deliver to store"
+                OrderPhase.DELIVERY_FROM_STORE -> "Ready to collect from store"
+                OrderPhase.DELIVERY_TO_CUSTOMER -> "Ready for final delivery"
+            }
 
             btnProceed?.setOnClickListener {
                 val activity = itemView.context as? FragmentActivity ?: return@setOnClickListener
@@ -104,33 +124,21 @@ class AssignedOrderAdapter(
 
         // ----- helpers -----
 
-        private fun isPickup(order: AssignedOrder): Boolean {
-            val s = (order.order_status ?: "").lowercase(Locale.getDefault())
+        private fun determineCurrentPhase(order: AssignedOrder): CurrentPhase {
+            val status = (order.order_status ?: "").lowercase(Locale.getDefault())
 
-            // Hide completed orders - they should not be shown
-            if (s == "completed") {
-                return false // This will be filtered out at adapter level
+            return when (status) {
+                "assigned", "accepted", "processing", "confirmed" ->
+                    CurrentPhase(OrderPhase.PICKUP_TO_PICKUP, "Go to pickup address")
+                "picked_up" ->
+                    CurrentPhase(OrderPhase.PICKUP_TO_STORE, "Deliver to store")
+                "received", "ready_for_delivery" ->
+                    CurrentPhase(OrderPhase.DELIVERY_FROM_STORE, "Collect from store")
+                "shipped", "out_for_delivery" ->
+                    CurrentPhase(OrderPhase.DELIVERY_TO_CUSTOMER, "Deliver to customer")
+                else ->
+                    CurrentPhase(OrderPhase.PICKUP_TO_PICKUP, "Unknown status")
             }
-
-            // Check if status contains "delivery" anywhere - if so, it's delivery phase
-            if (s.contains("delivery")) {
-                return false
-            }
-
-            // Explicit delivery statuses
-            val deliveryStatuses = setOf("out_for_delivery", "shipped", "in_transit", "delivered", "ready_to_delivery")
-            if (s in deliveryStatuses) {
-                return false
-            }
-
-            // Explicit pickup statuses
-            val pickupStatuses = setOf("accepted", "assigned", "ready_for_pickup", "processing", "confirmed")
-            if (s in pickupStatuses) {
-                return true
-            }
-
-            // Default fallback: if pickup info exists, assume pickup
-            return !order.pickup_date.isNullOrBlank() && !order.pickup_slot_start_time.isNullOrBlank()
         }
 
         private fun prettyDateLong(dateStr: String?): String {
@@ -184,6 +192,18 @@ class AssignedOrderAdapter(
             } catch (_: Exception) {
                 "Starts in —"
             }
+        }
+
+        private data class CurrentPhase(
+            val phase: OrderPhase,
+            val description: String
+        )
+
+        private enum class OrderPhase {
+            PICKUP_TO_PICKUP,    // assigned -> pickup address
+            PICKUP_TO_STORE,     // picked_up -> store
+            DELIVERY_FROM_STORE, // ready_for_delivery -> store
+            DELIVERY_TO_CUSTOMER // shipped -> customer
         }
     }
 }

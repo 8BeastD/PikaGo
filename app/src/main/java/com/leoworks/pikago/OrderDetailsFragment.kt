@@ -129,7 +129,7 @@ class OrderDetailsFragment : Fragment() {
             requireContext(),
             when (status.lowercase()) {
                 "completed" -> R.color.success_color
-                "in_progress", "picked_up" -> R.color.primary_color
+                "picked_up", "shipped", "received" -> R.color.primary_color
                 "cancelled" -> R.color.error_color
                 else -> R.color.warning_color
             }
@@ -168,35 +168,51 @@ class OrderDetailsFragment : Fragment() {
 
     private fun bindAddresses() {
         val a = assigned
-        val statusRaw = a?.orderStatus
+        val status = a?.orderStatus?.lowercase().orEmpty()
 
         val pickupJson = a?.addressDetails?.toJSONObject()
         val dropJson = a?.dropAddress?.toJSONObject()
 
-        // Match NavigationActivity logic: if status contains "delivery", swap addresses
-        val status = statusRaw?.lowercase().orEmpty()
-
-        if (status.contains("delivery")) {
-            // For delivery phase: pickup = dropAddress, delivery = addressDetails
-            pickupAddress = dropJson
-            deliveryAddress = pickupJson
-        } else {
-            // For pickup phase: pickup = addressDetails, delivery = dropAddress
-            pickupAddress = pickupJson
-            deliveryAddress = dropJson
+        // Determine current addresses based on order status and workflow
+        when (status) {
+            "assigned", "accepted", "processing", "confirmed" -> {
+                // Phase 1: Go to pickup address (address_details)
+                pickupAddress = pickupJson
+                deliveryAddress = dropJson // For future reference
+            }
+            "picked_up" -> {
+                // Phase 2: Go to store (drop_address)
+                pickupAddress = dropJson // Store address
+                deliveryAddress = pickupJson // Customer address for later
+            }
+            "received", "ready_for_delivery" -> {
+                // Phase 3: Go to store (drop_address) for delivery
+                pickupAddress = dropJson // Store address
+                deliveryAddress = pickupJson // Customer address
+            }
+            "shipped", "out_for_delivery" -> {
+                // Phase 4: Go to customer (address_details)
+                pickupAddress = pickupJson // Customer address
+                deliveryAddress = pickupJson // Same as pickup for final delivery
+            }
+            else -> {
+                // Default fallback
+                pickupAddress = pickupJson
+                deliveryAddress = dropJson
+            }
         }
 
         // Address lines
         binding.txtPickupAddress.text = pickupAddress?.toPrettyAddress() ?: "Address not available"
         binding.txtDeliveryAddress.text = deliveryAddress?.toPrettyAddress() ?: "Address not available"
 
-        // PICKUP contact/phone
+        // PICKUP contact/phone (current destination)
         val pName = pickupAddress?.optString("recipient_name").orEmpty().ifBlank { "N/A" }
         val pPhone = pickupAddress?.optString("phone_number").orEmpty().ifBlank { "N/A" }
         binding.txtPickupContactName.text = pName
         binding.txtPickupPhone.text = pPhone
 
-        // DELIVERY contact/phone
+        // DELIVERY contact/phone (final destination)
         val dName = deliveryAddress?.optString("recipient_name").orEmpty().ifBlank { "N/A" }
         val dPhone = deliveryAddress?.optString("phone_number").orEmpty().ifBlank { "N/A" }
         binding.txtCustomerName.text = dName
@@ -248,8 +264,8 @@ class OrderDetailsFragment : Fragment() {
 
     private fun callCustomer() {
         try {
-            // Use the currently bound deliveryAddress first; fall back to pickup if needed
-            val phone = (deliveryAddress ?: pickupAddress)?.optString("phone_number").orEmpty()
+            // Use the currently bound pickupAddress (current destination) first
+            val phone = pickupAddress?.optString("phone_number").orEmpty()
             if (phone.isNotBlank()) {
                 val intent = android.content.Intent(android.content.Intent.ACTION_DIAL).apply {
                     data = android.net.Uri.parse("tel:$phone")
@@ -363,8 +379,8 @@ class OrderDetailsFragment : Fragment() {
         @SerialName("delivery_slot_display_time") val deliverySlotDisplayTime: String? = null,
 
         // JSONB
-        @SerialName("address_details") val addressDetails: JsonObject? = null, // pickup address
-        @SerialName("drop_address") val dropAddress: JsonObject? = null       // delivery address
+        @SerialName("address_details") val addressDetails: JsonObject? = null, // pickup/customer address
+        @SerialName("drop_address") val dropAddress: JsonObject? = null       // store address
     )
 
     @Serializable
