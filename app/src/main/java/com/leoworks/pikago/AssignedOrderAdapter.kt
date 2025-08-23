@@ -132,7 +132,7 @@ class AssignedOrderAdapter(
                     CurrentPhase(OrderPhase.PICKUP_TO_PICKUP, "Go to pickup address")
                 "picked_up" ->
                     CurrentPhase(OrderPhase.PICKUP_TO_STORE, "Deliver to store")
-                "received", "ready_for_delivery" ->
+                "reached", "ready_for_delivery" ->
                     CurrentPhase(OrderPhase.DELIVERY_FROM_STORE, "Collect from store")
                 "shipped", "out_for_delivery" ->
                     CurrentPhase(OrderPhase.DELIVERY_TO_CUSTOMER, "Deliver to customer")

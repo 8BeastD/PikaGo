@@ -561,7 +561,7 @@ class NavigationActivity : AppCompatActivity() {
         lifecycleScope.launch {
             when (currentPhase) {
                 NavigationPhase.PICKUP_TO_PICKUP -> handlePickupCollection()
-                NavigationPhase.PICKUP_TO_STORE -> handleStoreDelivery()      // ⬅ Fixed: only sets to "received"
+                NavigationPhase.PICKUP_TO_STORE -> handleStoreDelivery()      // ⬅ Updated: now deletes from table
                 NavigationPhase.DELIVERY_FROM_STORE -> handleStoreCollection()
                 NavigationPhase.DELIVERY_TO_CUSTOMER -> handleFinalDelivery()
             }
@@ -597,39 +597,42 @@ class NavigationActivity : AppCompatActivity() {
         }
     }
 
-    // ✅ FIXED: Only sets status to "received" - NO auto-change to "ready_for_delivery"
+    // ✅ UPDATED: Sets status to "reached" AND deletes from assigned_orders table
     private suspend fun handleStoreDelivery() {
         try {
             progressIndicator.visibility = View.VISIBLE
 
-            // ONLY set to "received" - do NOT change to "ready_for_delivery"
+            // First update the status to "reached"
             supabase.from("assigned_orders").update({
-                set("order_status", "received")
+                set("order_status", "reached")
             }) {
                 filter { eq("id", orderId) }
             }
 
-            toast("✅ Items delivered to store (status: received)")
+            // Then delete the order from assigned_orders table
+            supabase.from("assigned_orders").delete {
+                filter { eq("id", orderId) }
+            }
+
+            toast("✅ Items delivered to store and removed from queue!")
             triggerSuccessHaptic()
 
-            // Show completion message and stay on the same screen
-            // The order status remains "received" until backend/admin changes it
+            // Show completion message
             swipeText.text = "✓ Store Delivery Complete"
-            swipeHint.text = "Order status: received - waiting for store processing"
+            swipeHint.text = "Order delivered & removed - admin will reassign for delivery"
 
             // Disable the swipe slider since this phase is complete
             swipeSlider.isEnabled = false
             swipeSlider.alpha = 0.5f
 
-            // Show a message that they can exit or wait for next phase
+            // Show success message and finish activity
             handler.postDelayed({
-                toast("Order delivered to store. Status: received")
-                // Optionally finish the activity or wait for status update
+                toast("🎉 Order delivered to store successfully!")
                 finish()
             }, 2000)
 
         } catch (e: Exception) {
-            toast("Failed to update store delivery: ${e.message}")
+            toast("Failed to complete store delivery: ${e.message}")
         } finally {
             progressIndicator.visibility = View.GONE
         }
