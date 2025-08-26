@@ -15,6 +15,7 @@ import com.leoworks.pikago.adapters.AssignedOrderAdapter
 import com.leoworks.pikago.databinding.FragmentRideBinding
 import com.leoworks.pikago.models.AssignedOrder
 import io.github.jan.supabase.SupabaseClient
+import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -119,20 +120,53 @@ class RideFragment : Fragment() {
         showLoading(true)
         viewLifecycleOwner.lifecycleScope.launch {
             try {
+                // 🔐 Only fetch for the currently logged-in user (via Supabase auth)
+                val currentUserId = supabase.auth.currentUserOrNull()?.id
+                if (currentUserId.isNullOrBlank()) {
+                    adapter.submit(emptyList())
+                    setEmptyVisible(true)
+                    Toast.makeText(requireContext(), "Not logged in", Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+
                 val selectedYmd = toYMD(selectedEpochDayUtc) // "yyyy-MM-dd" of selected date
                 val table = supabase.from("assigned_orders")
 
-                // Pull exactly the selected day: (pickup_date = selectedYmd) ∪ (delivery_date = selectedYmd)
-                val rowsPickup: List<AssignedOrder> = table.select {
-                    filter { eq("pickup_date", selectedYmd) }
+                // Pull exactly the selected day for this user:
+                // (pickup_date = selectedYmd AND (user_id = uid)) ∪ (pickup_date = selectedYmd AND (other_db_user_id = uid))
+                // ∪ (delivery_date = selectedYmd AND (user_id = uid)) ∪ (delivery_date = selectedYmd AND (other_db_user_id = uid))
+
+                val rowsPickupUser: List<AssignedOrder> = table.select {
+                    filter {
+                        eq("pickup_date", selectedYmd)
+                        eq("user_id", currentUserId)
+                    }
                 }.decodeList()
 
-                val rowsDelivery: List<AssignedOrder> = table.select {
-                    filter { eq("delivery_date", selectedYmd) }
+                val rowsPickupOtherDb: List<AssignedOrder> = table.select {
+                    filter {
+                        eq("pickup_date", selectedYmd)
+                        eq("other_db_user_id", currentUserId)
+                    }
+                }.decodeList()
+
+                val rowsDeliveryUser: List<AssignedOrder> = table.select {
+                    filter {
+                        eq("delivery_date", selectedYmd)
+                        eq("user_id", currentUserId)
+                    }
+                }.decodeList()
+
+                val rowsDeliveryOtherDb: List<AssignedOrder> = table.select {
+                    filter {
+                        eq("delivery_date", selectedYmd)
+                        eq("other_db_user_id", currentUserId)
+                    }
                 }.decodeList()
 
                 // Merge and dedupe
-                val rows = (rowsPickup + rowsDelivery).distinctBy { it.id }
+                val rows = (rowsPickupUser + rowsPickupOtherDb + rowsDeliveryUser + rowsDeliveryOtherDb)
+                    .distinctBy { it.id }
 
                 // If the selected day is TODAY, hide orders whose START time has already passed.
                 val todayYmd = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
@@ -140,9 +174,8 @@ class RideFragment : Fragment() {
 
                 val filtered = rows.filter { r ->
                     val startAt = startEpochMillis(r)
-                    // Keep if start time exists and (either selected day != today or start >= now)
                     if (startAt == null) true
-                    else if (selectedYmd != todayYmd) true  // Fixed: use selectedYmd instead of ymd
+                    else if (selectedYmd != todayYmd) true
                     else startAt >= now
                 }
 
